@@ -193,5 +193,29 @@ class PrintDocumentTests(unittest.TestCase):
                 p.stop()
 
 
+class PresentHelperTests(unittest.TestCase):
+    def test_helper_injected_only_with_present_query(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            deck = Path(tmp) / "deck"
+            (deck / "slides").mkdir(parents=True)
+            (deck / "slides" / "010.html").write_text("<section class='slide'>x</section>")
+            (deck / "out").mkdir()
+            (deck / "out" / "index.html").write_text("<html><body><p>deck</p></body></html>")
+            p = preview.DeckPreview(deck, "slides", None, extra_files=("out/index.html",))
+            port = p.start()
+            try:
+                with urllib.request.urlopen(f"http://127.0.0.1:{port}/out/index.html") as r:
+                    self.assertNotIn(b"hs-hit", r.read())
+                with urllib.request.urlopen(f"http://127.0.0.1:{port}/out/index.html?hs=present") as r:
+                    body = r.read()
+                self.assertIn(b"hs-hit", body)
+                self.assertTrue(body.endswith(b"</script></body></html>"), body[-60:])
+            finally:
+                p.stop()
+
+    def test_helper_appended_without_body_tag(self) -> None:
+        self.assertTrue(preview.inject_present_helper("<p>x</p>").endswith("</script>"))
+
+
 if __name__ == "__main__":
     unittest.main()

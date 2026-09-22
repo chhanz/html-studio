@@ -24,7 +24,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 STAGE_W, STAGE_H = 1280, 720
 _STATIC_PREFIXES = ("assets", "img", "out")
@@ -133,6 +133,34 @@ def _inject_pageno(fragment: str, n: int) -> str:
         return f'{m.group(1)}{m.group(3)}<span class="pageno">{n}</span>{m.group(4)}'
 
     return _FOOT_RE.sub(repl, fragment, count=1)
+
+
+# Helper injected into the built deck when it is shown inside the studio's
+# presenter (``?hs=present``). The presenter is a different origin, so it cannot
+# inspect the deck's DOM; instead it sends the click point and this script
+# answers with the image under it (or a miss). Nothing else is changed.
+PRESENT_HELPER_JS = (
+    "<script>(function(){"
+    "function pick(el){while(el&&el!==document.documentElement){"
+    "if(el.tagName==='IMG'&&(el.currentSrc||el.src))return{kind:'img',src:el.currentSrc||el.src,alt:el.alt||''};"
+    "if(el.tagName&&el.tagName.toLowerCase()==='svg'){var r=el.getBoundingClientRect();if(r.width>=64&&r.height>=64)"
+    "return{kind:'svg',svg:new XMLSerializer().serializeToString(el)};}"
+    "var bg=getComputedStyle(el).backgroundImage,m=bg&&/url\\((['\"]?)([^'\")]+)\\1\\)/.exec(bg);"
+    "if(m&&el.getBoundingClientRect().width>=64)return{kind:'img',src:new URL(m[2],location.href).href,alt:''};"
+    "el=el.parentElement;}return null;}"
+    "addEventListener('message',function(e){var m=e.data||{};if(m.type!=='hs-hit')return;"
+    "var hit=pick(document.elementFromPoint(m.x,m.y));"
+    "parent.postMessage(hit?Object.assign({type:'hs-zoom'},hit):{type:'hs-miss'},'*');});"
+    "})();</script>"
+)
+_BODY_END_RE = re.compile(r"</body>", re.I)
+
+
+def inject_present_helper(page: str) -> str:
+    """Return the page with the presenter helper appended to its body."""
+    if _BODY_END_RE.search(page):
+        return _BODY_END_RE.sub(lambda _m: PRESENT_HELPER_JS + "</body>", page, count=1)
+    return page + PRESENT_HELPER_JS
 
 
 class DeckPreview:
@@ -279,7 +307,8 @@ class DeckPreview:
 
     # --- dispatch
     def _handle(self, h: BaseHTTPRequestHandler) -> None:
-        path = urlsplit(h.path).path
+        url = urlsplit(h.path)
+        path = url.path
         if path == "/health":
             return _send(h, 200, b'{"status":"ok"}', "application/json")
         if path == "/print":
@@ -297,7 +326,10 @@ class DeckPreview:
         if target is None:
             return _send(h, 404, b"not found", "text/plain")
         ctype = _TEXT_TYPES.get(target.suffix.lower()) or mimetypes.guess_type(str(target))[0] or "application/octet-stream"
-        return _send(h, 200, target.read_bytes(), ctype)
+        data = target.read_bytes()
+        if ctype.startswith("text/html") and "present" in parse_qs(url.query).get("hs", []):
+            data = inject_present_helper(data.decode("utf-8", errors="replace")).encode("utf-8")
+        return _send(h, 200, data, ctype)
 
 
 def _send(h: BaseHTTPRequestHandler, code: int, body: bytes, ctype: str) -> None:

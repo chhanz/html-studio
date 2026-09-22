@@ -13,6 +13,8 @@ type Props = {
   onClose: () => void
 }
 
+type Zoom = { kind: 'img'; src: string; alt: string } | { kind: 'svg'; svg: string }
+
 /**
  * Presentation mode inside the dashboard: a full-viewport overlay hosting the
  * built deck in an iframe, taken to real fullscreen with the Fullscreen API.
@@ -22,7 +24,9 @@ type Props = {
  *    control) ends the presentation, and ending the presentation leaves fullscreen.
  *  - Keyboard never depends on where focus is: a transparent shield sits over
  *    the iframe so keys arrive here (capture phase) whatever runtime the deck
- *    uses. Click on the shield = next slide, like a clicker.
+ *    uses. A click on the shield is sent to the deck as a hit test (the deck is
+ *    another origin, so we cannot look ourselves): an image under the pointer
+ *    opens the lightbox, anything else advances, like a clicker.
  *  - Closing never waits on the Fullscreen API: unmount first, then exit
  *    fullscreen best-effort. The shell can lower the window without firing
  *    fullscreenchange, so a watchdog compares the viewport with the screen.
@@ -33,9 +37,14 @@ export function Presenter({ t, url, startSlide, slideCount, onClose }: Props) {
   const [current, setCurrent] = useState(startSlide)
   const [fullscreen, setFullscreen] = useState(false)
   const [chrome, setChrome] = useState(true)
+  const [zoom, setZoom] = useState<Zoom | null>(null)
+  const zoomRef = useRef<Zoom | null>(null)
+  zoomRef.current = zoom
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const closed = useRef(false)
   const wasFullscreen = useRef(false)
+  // The deck is served with the presenter helper injected (see preview.py).
+  const frameUrl = `${url}?hs=present`
 
   const close = useCallback(() => {
     if (closed.current) return
@@ -66,12 +75,27 @@ export function Presenter({ t, url, startSlide, slideCount, onClose }: Props) {
       setCurrent(n)
       post({ type: 'hs-go', index: n - 1 })
       // External runtimes usually follow the hash; a src change that only
-      // differs in the fragment is a fragment navigation, not a reload.
+      // differs in the fragment is a fragment navigation, not a reload — so it
+      // must be the same presenter URL (with the helper query) as the initial load.
       const f = frameRef.current
-      if (f) f.src = `${url}#${n}`
+      if (f) f.src = `${frameUrl}#${n}`
     },
-    [post, slideCount, url],
+    [post, slideCount, frameUrl],
   )
+
+  // F: none. Esc is the single exit (fullscreen and presentation are one thing).
+  const goRef = useRef(go)
+  goRef.current = go
+  const currentRef = useRef(current)
+  currentRef.current = current
+
+  // Ask the deck what is under the pointer; it answers hs-zoom or hs-miss.
+  const hitTest = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const f = frameRef.current
+    if (!f) return
+    const r = f.getBoundingClientRect()
+    post({ type: 'hs-hit', x: e.clientX - r.left, y: e.clientY - r.top })
+  }, [post])
 
   useEffect(() => {
     rootRef.current?.focus()
@@ -104,10 +128,13 @@ export function Presenter({ t, url, startSlide, slideCount, onClose }: Props) {
   // The built-in runtime reports its position and forwards keys it saw.
   useEffect(() => {
     const onMsg = (e: MessageEvent) => {
-      const m = e.data as { type?: string; index?: number } | null
+      const m = e.data as ({ type?: string; index?: number } & Partial<Zoom>) | null
       if (e.source !== frameRef.current?.contentWindow || !m) return
       if (m.type === 'hs-slide' && typeof m.index === 'number') setCurrent(m.index + 1)
       else if (m.type === 'hs-exit') close()
+      else if (m.type === 'hs-zoom' && m.kind === 'img' && typeof m.src === 'string') setZoom({ kind: 'img', src: m.src, alt: m.alt ?? '' })
+      else if (m.type === 'hs-zoom' && m.kind === 'svg' && typeof m.svg === 'string') setZoom({ kind: 'svg', svg: m.svg })
+      else if (m.type === 'hs-miss') goRef.current(currentRef.current + 1)
     }
     window.addEventListener('message', onMsg)
     return () => window.removeEventListener('message', onMsg)
@@ -117,10 +144,16 @@ export function Presenter({ t, url, startSlide, slideCount, onClose }: Props) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return
-      if (e.key === 'Escape') close()
-      else if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ' || e.key === 'Enter') go(current + 1)
-      else if (e.key === 'ArrowLeft' || e.key === 'PageUp' || e.key === 'Backspace') go(current - 1)
-      else if (e.key === 'Home') go(1)
+      if (e.key === 'Escape') {
+        if (zoomRef.current) setZoom(null)
+        else close()
+      } else if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ' || e.key === 'Enter') {
+        setZoom(null)
+        go(current + 1)
+      } else if (e.key === 'ArrowLeft' || e.key === 'PageUp' || e.key === 'Backspace') {
+        setZoom(null)
+        go(current - 1)
+      } else if (e.key === 'Home') go(1)
       else if (e.key === 'End') go(slideCount)
       else return
       e.preventDefault()
@@ -157,22 +190,39 @@ export function Presenter({ t, url, startSlide, slideCount, onClose }: Props) {
     >
       <iframe
         ref={frameRef}
-        src={`${url}#${startSlide}`}
+        src={`${frameUrl}#${startSlide}`}
         title={t('present.title')}
         sandbox="allow-scripts allow-same-origin"
         tabIndex={-1}
         className="flex-1 w-full h-full border-0"
       />
-      {/* Click shield: keeps focus here and turns a click into "next". */}
+      {/* Click shield: keeps focus here; a click is hit-tested in the deck
+          (image → lightbox, otherwise next). Right-click = previous. */}
       <div
         data-testid="present-shield"
         className="absolute inset-0"
-        onClick={() => go(current + 1)}
+        onClick={hitTest}
         onContextMenu={(e) => {
           e.preventDefault()
           go(current - 1)
         }}
       />
+      {zoom && (
+        <div
+          data-testid="present-zoom"
+          role="img"
+          aria-label={zoom.kind === 'img' ? zoom.alt || t('present.zoom') : t('present.zoom')}
+          className="absolute inset-0 flex items-center justify-center"
+          style={{ background: 'rgba(0,0,0,.92)', cursor: 'zoom-out' }}
+          onClick={() => setZoom(null)}
+        >
+          {zoom.kind === 'img' ? (
+            <img src={zoom.src} alt={zoom.alt} style={{ maxWidth: '96vw', maxHeight: '96vh', objectFit: 'contain' }} />
+          ) : (
+            <img src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(zoom.svg)}`} alt="" style={{ maxWidth: '96vw', maxHeight: '96vh', objectFit: 'contain' }} />
+          )}
+        </div>
+      )}
       <div
         className="absolute left-0 right-0 bottom-0 flex items-center gap-2 px-3 py-2 text-[12px] transition-opacity"
         style={{ background: 'rgba(0,0,0,.6)', color: '#ddd', opacity: chrome ? 1 : 0 }}
