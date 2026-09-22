@@ -83,9 +83,8 @@
   "error.pdf_failed": "PDF 렌더링에 실패했습니다.",
   "error.open_failed": "시스템 브라우저를 열 수 없습니다.",
   "present.title": "발표",
-  "present.keys": "← → 이동 · F 전체화면 · Esc 종료",
+  "present.keys": "← → 이동 · Esc 또는 F 종료",
   "present.fullscreen": "전체화면",
-  "present.exit_fullscreen": "전체화면 해제",
   "present.close": "종료",
   "present.browser": "브라우저에서 열기",
   "present.browser_hint": "빌드된 덱을 기본 브라우저에서 열기(두 번째 화면용)"

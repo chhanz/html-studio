@@ -59,25 +59,31 @@ export function Presenter({ t, url, startSlide, slideCount, onClose }: Props) {
     [post, slideCount],
   )
 
-  const toggleFullscreen = useCallback(async () => {
+  const enterFullscreen = useCallback(async () => {
     const el = rootRef.current
-    if (!el) return
+    if (!el || document.fullscreenElement) return
     try {
-      if (document.fullscreenElement) await document.exitFullscreen()
-      else await el.requestFullscreen()
+      await el.requestFullscreen()
     } catch {
-      /* not permitted: stay as an overlay */
+      /* not permitted: stay as an overlay; F retries */
     }
   }, [])
 
-  // Enter fullscreen on mount; leaving fullscreen (Esc) closes the presenter.
+  // Presenting IS fullscreen: entering the presenter goes fullscreen, and
+  // leaving fullscreen by any route (Esc, OS gesture, F) ends the presentation.
+  const toggle = useCallback(() => {
+    if (document.fullscreenElement) void close()
+    else void enterFullscreen()
+  }, [close, enterFullscreen])
+
+  const wasFullscreen = useRef(false)
   useEffect(() => {
-    void toggleFullscreen()
+    void enterFullscreen()
     const onChange = () => {
       const fs = !!document.fullscreenElement
       setFullscreen(fs)
-      if (!fs && wasFullscreen.current) onClose() // user left fullscreen (Esc/OS gesture)
       if (fs) wasFullscreen.current = true
+      else if (wasFullscreen.current) onClose()
     }
     document.addEventListener('fullscreenchange', onChange)
     return () => {
@@ -86,7 +92,6 @@ export function Presenter({ t, url, startSlide, slideCount, onClose }: Props) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-  const wasFullscreen = useRef(false)
 
   // The built-in runtime reports its position; keep the control bar in sync
   // when the deck itself handled the key (iframe focused).
@@ -96,10 +101,11 @@ export function Presenter({ t, url, startSlide, slideCount, onClose }: Props) {
       if (e.source !== frameRef.current?.contentWindow || !m) return
       if (m.type === 'hs-slide' && typeof m.index === 'number') setCurrent(m.index + 1)
       else if (m.type === 'hs-exit') void close()
+      else if (m.type === 'hs-fullscreen') toggle()
     }
     window.addEventListener('message', onMsg)
     return () => window.removeEventListener('message', onMsg)
-  }, [close])
+  }, [close, toggle])
 
   // Keyboard: handled here so it works even when the iframe has no focus.
   useEffect(() => {
@@ -118,12 +124,12 @@ export function Presenter({ t, url, startSlide, slideCount, onClose }: Props) {
       } else if (e.key === 'End') {
         go(slideCount)
       } else if (e.key === 'f' || e.key === 'F') {
-        void toggleFullscreen()
+        toggle()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [current, go, close, slideCount, toggleFullscreen])
+  }, [current, go, close, slideCount, toggle])
 
   // Auto-hide the control bar while the pointer is still.
   const poke = () => {
@@ -165,9 +171,9 @@ export function Presenter({ t, url, startSlide, slideCount, onClose }: Props) {
         <SmallBtn onClick={() => go(current + 1)} disabled={current >= slideCount} aria-label={t('viewer.next')} style={{ color: '#ddd', borderColor: '#555' }}>▸</SmallBtn>
         <span className="ml-3 text-[11px]" style={{ color: '#999' }}>{t('present.keys')}</span>
         <span className="ml-auto flex gap-1">
-          <SmallBtn onClick={() => void toggleFullscreen()} style={{ color: '#ddd', borderColor: '#555' }}>
-            {fullscreen ? t('present.exit_fullscreen') : t('present.fullscreen')}
-          </SmallBtn>
+          {!fullscreen && (
+            <SmallBtn onClick={() => void enterFullscreen()} style={{ color: '#ddd', borderColor: '#555' }}>{t('present.fullscreen')}</SmallBtn>
+          )}
           <SmallBtn onClick={() => void close()} style={{ color: '#ddd', borderColor: '#555' }}>{t('present.close')}</SmallBtn>
         </span>
       </div>

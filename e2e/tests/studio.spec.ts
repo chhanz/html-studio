@@ -175,6 +175,27 @@ test('present opens an in-app presenter at the current slide', async ({ page }) 
   await page.mouse.move(400, 300) // control bar auto-hides; a pointer move reveals it
   await expect(dialog.getByText('4 / 4')).toBeVisible()
 
+  // Headless Chromium has no real fullscreen: stub it and check the wiring.
+  // F pressed INSIDE the deck iframe must reach the presenter and request
+  // fullscreen on the overlay; once fullscreen, F (or Esc) ends the presentation.
+  await page.evaluate(() => {
+    const w = window as any
+    w.__fsCalls = 0
+    let fsEl: Element | null = null
+    Element.prototype.requestFullscreen = function () { w.__fsCalls++; fsEl = this; document.dispatchEvent(new Event('fullscreenchange')); return Promise.resolve() }
+    ;(document as any).exitFullscreen = () => { fsEl = null; document.dispatchEvent(new Event('fullscreenchange')); return Promise.resolve() }
+    Object.defineProperty(document, 'fullscreenElement', { get: () => fsEl, configurable: true })
+  })
+  await frame.locator('.slide.active').click()
+  await page.keyboard.press('f')
+  await expect.poll(() => page.evaluate(() => (window as any).__fsCalls)).toBe(1)
+  await expect(dialog).toBeVisible()
+  await page.keyboard.press('f')
+  await expect(dialog).toHaveCount(0)
+
+  // Esc closes too, without fullscreen involved.
+  await page.getByRole('button', { name: /^Present$/ }).click()
+  await expect(dialog).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(dialog).toHaveCount(0)
 })
