@@ -94,14 +94,17 @@ test('sidebar slide list scrolls inside its own pane', async ({ page }) => {
   await addFixtureRoot(page)
   await selectDeck(page, 'acme-quarterly')
   const body = page.locator('#slides-body')
-  const metrics = await body.evaluate((el) => ({
-    scrollH: el.scrollHeight,
-    clientH: el.clientHeight,
-    overflowY: getComputedStyle(el).overflowY,
-    docScroll: document.documentElement.scrollHeight - document.documentElement.clientHeight,
-  }))
+  const read = () =>
+    body.evaluate((el) => ({
+      scrollH: el.scrollHeight,
+      clientH: el.clientHeight,
+      overflowY: getComputedStyle(el).overflowY,
+      docScroll: document.documentElement.scrollHeight - document.documentElement.clientHeight,
+    }))
+  // Thumbnails render lazily; wait until the list actually overflows.
+  await expect.poll(async () => (await read()).scrollH > (await read()).clientH).toBe(true)
+  const metrics = await read()
   expect(metrics.overflowY).toMatch(/auto|scroll/)
-  expect(metrics.scrollH).toBeGreaterThan(metrics.clientH)
   // The page itself does not grow: the pane is the scroller.
   expect(metrics.docScroll).toBeLessThanOrEqual(2)
   await body.evaluate((el) => (el.scrollTop = 10_000))
