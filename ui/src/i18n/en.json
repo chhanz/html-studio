@@ -70,5 +70,6 @@
   "error.deck_not_allowed": "That deck is not inside one of your deck folders.",
   "error.folder_chooser_failed": "The folder chooser could not be opened.",
   "error.picker_busy": "A folder chooser is already open.",
-  "error.path_required": "Enter a path."
+  "error.path_required": "Enter a path.",
+  "error.unknown_route": "The running backend is older than the app UI. Turn the app off and on in the App Store to restart it."
 }

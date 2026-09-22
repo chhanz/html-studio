@@ -367,7 +367,7 @@ class Handler(BaseHTTPRequestHandler):
         handler = ROUTES.get(key)
         if handler is None:
             _log(f"404 {method} {self.path}")
-            self._json(404, {"error": "not_found", "path": key[1]})
+            self._json(404, {"error": "unknown_route", "path": key[1], "version": APP_VERSION})
             return
 
         try:

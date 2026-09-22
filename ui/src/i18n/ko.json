@@ -70,5 +70,6 @@
   "error.deck_not_allowed": "그 덱은 등록한 덱 폴더 안에 없습니다.",
   "error.folder_chooser_failed": "폴더 선택 창을 열 수 없습니다.",
   "error.picker_busy": "폴더 선택 창이 이미 열려 있습니다.",
-  "error.path_required": "경로를 입력하세요."
+  "error.path_required": "경로를 입력하세요.",
+  "error.unknown_route": "실행 중인 백엔드가 앱 UI보다 오래된 버전입니다. App Store에서 앱을 끄고 다시 켜 백엔드를 재시작하세요."
 }

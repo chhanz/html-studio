@@ -110,8 +110,7 @@ class ServerTest(unittest.TestCase):
 
     def test_signed_unknown_route_is_404(self) -> None:
         code, data = self.request("GET", "/api/nope", signed=True)
-        self.assertEqual(code, 404)
-        self.assertEqual(data["path"], "/nope")
+        self.assertEqual((code, data["error"], data["path"]), (404, "unknown_route", "/nope"))
 
     def test_data_dir_created(self) -> None:
         self.assertTrue((Path(self.tmp.name) / "apps" / "html-studio" / "data").is_dir())
