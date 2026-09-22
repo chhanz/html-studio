@@ -98,5 +98,5 @@
   "chat.open_full_hint": "Open this session on the Chat page",
   "chat.placeholder": "Ask for a change to {name}…",
   "split.label": "Resize preview and chat",
-  "chat.tagline": "— ask the agent to change this deck; it works inside the deck folder"
+  "chat.tagline": "ask the agent to change this deck; it works inside the deck folder"
 }

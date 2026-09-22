@@ -40,8 +40,8 @@ export function deckBrief({ deck, preview, build, language }: BriefInput): strin
       : `slides folder: ${count} slides in ${deck.slidesDir}/ (one <section class="slide"> fragment per file, ordered by filename)`
   const css = preview?.css ? `Stylesheet: ${preview.css}` : 'Stylesheet: none (the studio applies its default theme)'
   let buildLine = 'Build: not applicable'
-  if (build?.command) buildLine = `Build: \`${build.command}\` → ${build.output}`
-  else if (build?.builtin && build.buildable) buildLine = `Build: HTML Studio's built-in assembler → ${build.output}`
+  if (build?.command) buildLine = `Build: run \`${build.command}\`, which writes ${build.output}`
+  else if (build?.builtin && build.buildable) buildLine = `Build: HTML Studio's built-in assembler writes ${build.output}`
   const lang = language.startsWith('ko') ? 'Korean' : 'English'
   return [
     'You are attached to an HTML slide deck managed by HTML Studio.',

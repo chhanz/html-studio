@@ -14,7 +14,7 @@ echo "== ui typecheck + build"
 (cd ui && npx tsc --noEmit && npm run build --silent)
 
 echo "== host class lint"
-(cd e2e && npm run --silent shim && node check-classes.mjs)
+(cd e2e && npm run --silent shim && node check-classes.mjs && node check-strings.mjs)
 
 if [ "${1:-}" = "quick" ]; then
   echo "quick verification passed"

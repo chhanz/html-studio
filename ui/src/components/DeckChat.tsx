@@ -91,7 +91,7 @@ export function DeckChat({ t, locale, deck, preview, build, open, onToggle }: Pr
             ▸
           </span>
           {t('panel.chat')}
-          {!open && <span className="font-normal text-[12px] text-muted truncate">{t('chat.tagline')}</span>}
+          {!open && <span className="font-normal text-[12px] text-muted truncate ml-1">{t('chat.tagline')}</span>}
         </button>
         <div className="flex gap-1 items-center flex-none">
           {status === 'checking' && <Spinner />}
