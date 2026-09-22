@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { addFixtureRoot, openApp, resetBackend, selectDeck } from './helpers'
+import { addFixtureRoot, fakeHome, openApp, resetBackend, selectDeck } from './helpers'
 
 test.describe.configure({ mode: 'serial' })
 
@@ -223,4 +223,49 @@ test('exports the built deck to PDF', async ({ page }) => {
   await expect(done).toBeVisible({ timeout: 60_000 })
   await expect(done).toContainText(/acme-quarterly\.pdf/)
   await expect(page.getByRole('button', { name: /Show in folder/ })).toBeVisible()
+})
+
+test('chat opens one project-scoped session per deck and briefs it once', async ({ page }) => {
+  await openApp(page)
+  await addFixtureRoot(page)
+  await selectDeck(page, 'acme-quarterly')
+  const home = await fakeHome(page)
+
+  await page.getByRole('button', { name: /^Chat$/ }).click()
+  await expect.poll(() => page.evaluate(() => ((window as any).__hsNav || []).length)).toBe(1)
+  const nav1: string = await page.evaluate(() => (window as any).__hsNav[0])
+  expect(nav1).toMatch(/^\/chat\?sid=html-studio-[0-9a-f]{12}$/)
+
+  let state = await (await page.request.get('/__ctl/chat')).json()
+  expect(state.slots).toHaveLength(1)
+  const slot = state.slots[0]
+  expect(slot.title).toBe('HTML Studio · acme-quarterly')
+  expect(slot.project).toBe(`${home}/decks/acme-quarterly`)
+  expect(slot.messages).toBe(1) // the brief
+  const sends = state.log.filter((l: any) => l.path.startsWith('/api/chat?'))
+  expect(sends).toHaveLength(1)
+  expect(sends[0].body.slot).toBe(slot.key)
+  expect(sends[0].body.message).toContain('slides folder: 4 slides in slides/')
+  expect(sends[0].body.message).toContain(`Path: ${home}/decks/acme-quarterly`)
+  expect(sends[0].body.message).toContain("HTML Studio's built-in assembler")
+  expect(sends[0].body.message).toContain('acknowledgement in English')
+
+  // Second click: same session, project re-asserted, no second brief.
+  await page.getByRole('button', { name: /^Chat$/ }).click()
+  await expect.poll(() => page.evaluate(() => ((window as any).__hsNav || []).length)).toBe(2)
+  expect(await page.evaluate(() => (window as any).__hsNav[1])).toBe(nav1)
+  state = await (await page.request.get('/__ctl/chat')).json()
+  expect(state.slots).toHaveLength(1)
+  expect(state.slots[0].messages).toBe(1)
+  expect(state.log.filter((l: any) => l.path.startsWith('/api/chat?'))).toHaveLength(1)
+
+  // A different deck gets a different session.
+  await selectDeck(page, 'acme-built')
+  await page.getByRole('button', { name: /^Chat$/ }).click()
+  await expect.poll(() => page.evaluate(() => ((window as any).__hsNav || []).length)).toBe(3)
+  expect(await page.evaluate(() => (window as any).__hsNav[2])).not.toBe(nav1)
+  state = await (await page.request.get('/__ctl/chat')).json()
+  expect(state.slots).toHaveLength(2)
+  const single = state.log.filter((l: any) => l.path.startsWith('/api/chat?')).at(-1)
+  expect(single.body.message).toContain('single file:')
 })

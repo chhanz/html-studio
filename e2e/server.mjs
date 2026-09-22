@@ -120,6 +120,42 @@ function serveFile(res, root, rel) {
   res.end(readFileSync(path))
 }
 
+// Stand-in for the dashboard's chat API, just enough for the deck-chat flow:
+//   POST /api/chat/slots {name, title}         get-or-create by name → {key, messages, title}
+//   POST /api/chat/slots/<key>/project {project}
+//   POST /api/chat?ws=1 {message, slot}       counts as one message on the slot
+// Every call is appended to chatLog so a test can assert the exact sequence.
+const chatSlots = new Map()
+const chatLog = []
+function fakeChatApi(req, res, p, body) {
+  const json = body.length ? JSON.parse(body.toString('utf-8')) : {}
+  chatLog.push({ method: req.method, path: req.url, body: json })
+  const send = (code, obj) => {
+    res.writeHead(code, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify(obj))
+  }
+  if (req.method !== 'POST') return send(405, { error: 'method' })
+  if (p === '/api/chat/slots') {
+    const name = String(json.name || `chat-${chatSlots.size + 1}`)
+    if (!chatSlots.has(name)) chatSlots.set(name, { key: name, title: json.title || '', messages: 0, project: '' })
+    return send(200, chatSlots.get(name))
+  }
+  const m = /^\/api\/chat\/slots\/([^/]+)\/project$/.exec(p)
+  if (m) {
+    const slot = chatSlots.get(decodeURIComponent(m[1]))
+    if (!slot) return send(404, { error: 'not found' })
+    slot.project = json.project
+    return send(200, { ok: true })
+  }
+  if (p === '/api/chat') {
+    const slot = chatSlots.get(String(json.slot))
+    if (!slot) return send(404, { error: 'not found' })
+    slot.messages += 1
+    return send(200, { ok: true })
+  }
+  return send(404, { error: 'not found' })
+}
+
 const server = createServer(async (req, res) => {
   const chunks = []
   for await (const c of req) chunks.push(c)
@@ -145,10 +181,17 @@ const server = createServer(async (req, res) => {
       await stopBackend()
       rmSync(crewHome, { recursive: true, force: true })
       mkdirSync(crewHome, { recursive: true })
+      chatSlots.clear()
+      chatLog.length = 0
       await startBackend()
       res.writeHead(200)
       return res.end('reset')
     }
+    if (p === '/__ctl/chat') {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      return res.end(JSON.stringify({ slots: [...chatSlots.values()], log: chatLog }))
+    }
+    if (p.startsWith('/api/chat')) return fakeChatApi(req, res, p, body)
     if (p.startsWith('/apps/html-studio/api/')) return await proxy(req, res, body)
     if (p === '/' || p === '/index.html') return serveFile(res, here, 'harness.html')
     if (p === '/app.json') return serveFile(res, repo, 'app.json')

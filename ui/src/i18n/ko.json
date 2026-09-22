@@ -88,5 +88,9 @@
   "present.fullscreen": "전체화면",
   "present.close": "종료",
   "present.browser": "브라우저에서 열기",
-  "present.browser_hint": "빌드된 덱을 기본 브라우저에서 열기(두 번째 화면용)"
+  "present.browser_hint": "빌드된 덱을 기본 브라우저에서 열기(두 번째 화면용)",
+  "toolbar.chat": "채팅",
+  "chat.hint": "이 덱의 채팅 세션 열기(에이전트가 덱 폴더 안에서 작업)",
+  "chat.title": "HTML Studio · {name}",
+  "chat.failed": "덱 채팅을 열 수 없습니다"
 }

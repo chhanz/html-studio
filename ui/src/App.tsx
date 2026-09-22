@@ -1,7 +1,8 @@
-import { useAppApi } from '@kirocrew/app-sdk'
+import { useAppApi, useNavigate } from '@kirocrew/app-sdk'
 import { Card, CardTitle, PageHeader } from '@kirocrew/app-sdk/ui'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ApiError, type BackendStatus, type BuildInfo, type BuildResult, type Deck, type PdfJob, type PreviewInfo, makeClient } from './api'
+import { openDeckChat } from './chat'
 import { BuildPanel } from './components/BuildPanel'
 import { DeckPanel } from './components/DeckPanel'
 import { Presenter } from './components/Presenter'
@@ -133,6 +134,29 @@ export default function HtmlStudio() {
   // --- present / pdf
   const [pdf, setPdf] = useState<PdfJob | null>(null)
   const [pdfError, setPdfError] = useState<string | null>(null)
+
+  // P1-7: one chat session per deck, project-scoped to the deck folder.
+  const navigate = useNavigate()
+  const [chatBusy, setChatBusy] = useState(false)
+  const [chatError, setChatError] = useState<string | null>(null)
+  const openChat = useCallback(async () => {
+    if (!selected || chatBusy) return
+    setChatBusy(true)
+    setChatError(null)
+    try {
+      const { key } = await openDeckChat(
+        api,
+        { deck: selected, preview, build: buildInfo, language: locale },
+        t('chat.title', { name: selected.name }),
+      )
+      navigate(`/chat?sid=${encodeURIComponent(key)}`)
+    } catch (e) {
+      // Dashboard routes are not wrapped by our client: surface the SDK's message.
+      setChatError(e instanceof Error ? e.message : 'chat_failed')
+    } finally {
+      setChatBusy(false)
+    }
+  }, [api, selected, preview, buildInfo, locale, t, navigate, chatBusy])
   useEffect(() => {
     setPdf(null)
     setPdfError(null)
@@ -490,8 +514,23 @@ export default function HtmlStudio() {
                 {pdf?.state === 'running' && <Spinner />}
                 {t('toolbar.pdf')}
               </SmallBtn>
+              <SmallBtn
+                onClick={() => void openChat()}
+                disabled={!selected || chatBusy}
+                title={t('chat.hint')}
+                className="inline-flex items-center gap-1.5"
+              >
+                {chatBusy && <Spinner />}
+                {t('toolbar.chat')}
+              </SmallBtn>
             </div>
           </div>
+          {selected && chatError && (
+            <div className="mb-2 flex-none rounded-md border p-2 text-[12px]" style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }} role="alert">
+              {t('chat.failed')}
+              <span className="block text-muted break-all">{chatError}</span>
+            </div>
+          )}
           {selected && (pdf?.state === 'done' || pdfError) && (
             <div
               className="mb-2 flex-none rounded-md border p-2 text-[12px] flex items-center gap-2 flex-wrap"

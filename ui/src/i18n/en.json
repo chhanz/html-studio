@@ -88,5 +88,9 @@
   "present.fullscreen": "Fullscreen",
   "present.close": "Exit",
   "present.browser": "Open in browser",
-  "present.browser_hint": "Open the built deck in your default browser (for a second screen)"
+  "present.browser_hint": "Open the built deck in your default browser (for a second screen)",
+  "toolbar.chat": "Chat",
+  "chat.hint": "Open this deck's chat session (the agent works inside the deck folder)",
+  "chat.title": "HTML Studio · {name}",
+  "chat.failed": "Could not open the deck chat"
 }

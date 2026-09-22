@@ -1,13 +1,19 @@
 {
   "name": "html-studio",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "displayName": "HTML Studio",
   "description": "View, edit, check and present HTML slide decks. Point at an element in the live preview, leave a comment, and let the agent apply the change.",
   "author": "Cheolhee Han",
   "license": "MIT",
   "minKiroCrewVersion": "0.1.0",
   "iconPath": "assets/icon.svg",
-  "tags": ["design", "presentation", "html", "slides", "visual-editing"],
+  "tags": [
+    "design",
+    "presentation",
+    "html",
+    "slides",
+    "visual-editing"
+  ],
   "agents": [],
   "skills": [],
   "ui": {
@@ -30,7 +36,9 @@
   "permissions": {
     "api": [
       "/apps/html-studio/api",
-      "/apps/html-studio/api/*"
+      "/apps/html-studio/api/*",
+      "/api/chat",
+      "/api/chat/slots"
     ],
     "storage": true
   }

@@ -21,8 +21,10 @@ function permitted(path, list) {
 async function request(path, init = {}) {
   if (/^https?:\/\//.test(path)) throw new Error('[app-sdk] absolute URLs are not allowed')
   const list = await loadAllowed()
-  if (!permitted(path, list)) {
-    throw new Error(`[app-sdk] App "html-studio" not permitted to access ${path}. Declared: [${list.join(', ')}]`)
+  // Like the real SDK: the check is on the pathname, so "/api/chat?ws=1" is covered by "/api/chat".
+  const pathname = new URL(path, 'http://localhost').pathname
+  if (!permitted(pathname, list)) {
+    throw new Error(`[app-sdk] App "html-studio" not permitted to access ${pathname}. Declared: [${list.join(', ')}]`)
   }
   const headers = { ...(init.headers || {}) }
   let body = init.body
@@ -63,7 +65,10 @@ export function useAppInfo() {
   return { name: 'html-studio' }
 }
 export function useNavigate() {
-  return () => {}
+  // Records instead of navigating so a test can assert the target.
+  return (to) => {
+    ;(window.__hsNav ||= []).push(to)
+  }
 }
 export function useNotify() {
   return () => {}

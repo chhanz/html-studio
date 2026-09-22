@@ -28,6 +28,9 @@ export async function addFixtureRoot(page: Page) {
 }
 
 export async function selectDeck(page: Page, name: string) {
+  // Picking a deck collapses the Decks section; reopen it when switching decks.
+  const decksHeader = page.getByRole('button', { name: /^▸?\s*(Decks|덱)/ }).first()
+  if ((await decksHeader.count()) && (await decksHeader.getAttribute('aria-expanded')) === 'false') await decksHeader.click()
   await page.getByRole('option', { name: new RegExp(name) }).click()
   // Slides section opens and thumbnails render.
   await expect(page.locator('#slides-body')).toBeVisible()
