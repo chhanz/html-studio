@@ -137,6 +137,47 @@ export default function HtmlStudio() {
 
   // P1-7: the deck's chat lives in the pane under the preview (DeckChat).
   const [chatOpen, setChatOpen] = useCollapsed('chat', true)
+  // Preview / chat split: share of the right column given to the chat (persisted).
+  const [chatRatio, setChatRatio] = useState<number>(() => {
+    try {
+      const v = Number(localStorage.getItem('hs.chatRatio'))
+      return v >= 0.15 && v <= 0.8 ? v : 0.4
+    } catch {
+      return 0.4
+    }
+  })
+  const rightColRef = useRef<HTMLDivElement>(null)
+  const onSplitterDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      const col = rightColRef.current
+      if (!col) return
+      e.preventDefault()
+      const handle = e.currentTarget
+      handle.setPointerCapture(e.pointerId)
+      const rect = col.getBoundingClientRect()
+      const move = (ev: PointerEvent) => {
+        const ratio = Math.min(0.8, Math.max(0.15, (rect.bottom - ev.clientY) / rect.height))
+        setChatRatio(ratio)
+      }
+      const up = () => {
+        handle.removeEventListener('pointermove', move)
+        handle.removeEventListener('pointerup', up)
+        handle.removeEventListener('pointercancel', up)
+        setChatRatio((r) => {
+          try {
+            localStorage.setItem('hs.chatRatio', String(r))
+          } catch {
+            /* ignore */
+          }
+          return r
+        })
+      }
+      handle.addEventListener('pointermove', move)
+      handle.addEventListener('pointerup', up)
+      handle.addEventListener('pointercancel', up)
+    },
+    [],
+  )
   useEffect(() => {
     setPdf(null)
     setPdfError(null)
@@ -444,10 +485,10 @@ export default function HtmlStudio() {
         )}
 
         {/* Right column: preview above, deck chat below */}
-        <div className="hs-right min-h-0 flex flex-col gap-3">
-        <div className="hs-right-preview min-h-0 flex flex-col" style={{ flex: chatOpen ? '3 1 0' : '1 1 0' }}>
+        <div ref={rightColRef} className="hs-right min-h-0 flex flex-col">
+        <div className="hs-right-preview min-h-0 flex flex-col" style={{ flex: '1 1 0' }}>
         <Card>
-          <div className="hs-fill hs-scroll min-h-0 flex flex-col">
+          <div className="hs-fill min-h-0 flex flex-col">
           <div className="flex items-center justify-between gap-2 mb-2 flex-wrap flex-none">
             <CardTitle>{selected ? selected.name : t('panel.preview')}</CardTitle>
             <div className="flex gap-1 flex-wrap items-center">
@@ -523,7 +564,7 @@ export default function HtmlStudio() {
             </div>
           )}
           {selected && (buildResult || pendingCommand) && (
-            <div className="mb-2 flex-none">
+            <div className="mb-2 flex-none overflow-y-auto" style={{ maxHeight: "40%" }}>
               <BuildPanel
                 t={t}
                 result={buildResult}
@@ -579,8 +620,26 @@ export default function HtmlStudio() {
         </Card>
         </div>
 
+        {/* Splitter: drag to change the preview / chat share (hidden when the chat is collapsed) */}
+        {chatOpen ? (
+          <div
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label={t('split.label')}
+            aria-valuenow={Math.round(chatRatio * 100)}
+            data-testid="split-handle"
+            onPointerDown={onSplitterDown}
+            className="flex-none flex items-center justify-center"
+            style={{ flex: '0 0 12px', height: 12, cursor: 'row-resize', touchAction: 'none' }}
+          >
+            <div className="rounded-full" style={{ width: 48, height: 4, background: 'var(--border-strong, var(--border))' }} />
+          </div>
+        ) : (
+          <div style={{ flex: '0 0 12px', height: 12 }} />
+        )}
+
         {/* Deck chat (under the preview) */}
-        <div className="hs-right-chat min-h-0 flex flex-col" style={{ flex: chatOpen ? '2 1 0' : '0 0 auto' }}>
+        <div className="hs-right-chat min-h-0 flex flex-col" style={{ flex: chatOpen ? `0 0 ${Math.round(chatRatio * 1000) / 10}%` : '0 0 auto' }}>
         <Card>
           <DeckChat t={t} locale={locale} deck={selected} preview={preview} build={buildInfo} open={chatOpen} onToggle={() => setChatOpen(!chatOpen)} />
         </Card>

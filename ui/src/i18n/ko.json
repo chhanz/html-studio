@@ -96,5 +96,6 @@
   "chat.retry": "다시 시도",
   "chat.open_full": "채팅 화면에서 열기",
   "chat.open_full_hint": "이 세션을 채팅 페이지에서 열기",
-  "chat.placeholder": "{name}에 바꿀 점을 말해 주세요…"
+  "chat.placeholder": "{name}에 바꿀 점을 말해 주세요…",
+  "split.label": "미리보기/채팅 크기 조절"
 }

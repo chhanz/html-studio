@@ -280,3 +280,50 @@ test('deck chat pane: looks up, starts once, embeds the deck session', async ({ 
   await expect(page.getByTestId('chat-embed')).toHaveCount(0)
   await expect(pane).toBeVisible()
 })
+
+test('viewer fits its box at any chat size; the splitter resizes and persists', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await openApp(page)
+  await addFixtureRoot(page)
+  await selectDeck(page, 'acme-quarterly')
+
+  const fits = async () => {
+    const box = await page.getByTestId('slide-fit').boundingBox()
+    const stage = await page.getByTestId('slide-stage').boundingBox()
+    expect(box && stage).toBeTruthy()
+    // Whole 16:9 stage inside the available box (no clipped footer), aspect kept.
+    expect(stage!.width).toBeLessThanOrEqual(box!.width + 1)
+    expect(stage!.height).toBeLessThanOrEqual(box!.height + 1)
+    expect(Math.abs(stage!.width / stage!.height - 16 / 9)).toBeLessThan(0.02)
+    return stage!
+  }
+  const before = await fits()
+  const chatBefore = (await page.getByTestId('deck-chat').boundingBox())!.height
+
+  // Drag the splitter up: chat grows, preview shrinks, stage still fits.
+  const handle = page.getByTestId('split-handle')
+  const hb = (await handle.boundingBox())!
+  await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(hb.x + hb.width / 2, hb.y - 120, { steps: 6 })
+  await page.mouse.up()
+  const chatAfter = (await page.getByTestId('deck-chat').boundingBox())!.height
+  expect(chatAfter).toBeGreaterThan(chatBefore + 60)
+  const after = await fits()
+  expect(after.height).toBeLessThan(before.height)
+  const ratio = Number(await handle.getAttribute('aria-valuenow'))
+  expect(ratio).toBeGreaterThan(40)
+
+  // Persisted across a reload.
+  await page.reload()
+  await page.waitForFunction(() => (window as any).__hsReady === true)
+  await expect(page.getByTestId('split-handle')).toHaveAttribute('aria-valuenow', String(ratio))
+
+  // Collapsing the chat gives the preview the full height again.
+  await selectDeck(page, 'acme-quarterly')
+  await fits()
+  await page.getByRole('button', { name: /Deck chat/ }).click()
+  await expect(page.getByTestId('split-handle')).toHaveCount(0)
+  const full = await fits()
+  expect(full.height).toBeGreaterThan(after.height)
+})

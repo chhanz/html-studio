@@ -10,23 +10,31 @@ type Props = {
   className?: string
   /** Bump to force the iframe to reload (e.g. after a rebuild). */
   reloadKey?: number
+  /**
+   * 'width' (default): the box keeps the stage aspect ratio and scales to its
+   * width — right for thumbnails in a scrolling list.
+   * 'contain': the box fills whatever space its parent gives it and the stage
+   * is scaled to fit BOTH dimensions, centred — right for the main viewer,
+   * whose height depends on the chat pane below it.
+   */
+  fit?: 'width' | 'contain'
 }
 
 /**
  * Renders a slide page in an iframe at its native stage size, then scales the
- * whole frame with CSS transform so it fits the container width. The container
- * keeps the stage aspect ratio so layout never depends on iframe content.
+ * whole frame with CSS transform so it fits the container. Layout never depends
+ * on iframe content.
  */
-export function SlideFrame({ src, stageWidth, stageHeight, lazy = false, title, className = '', reloadKey = 0 }: Props) {
+export function SlideFrame({ src, stageWidth, stageHeight, lazy = false, title, className = '', reloadKey = 0, fit = 'width' }: Props) {
   const boxRef = useRef<HTMLDivElement>(null)
-  const [width, setWidth] = useState(0)
+  const [size, setSize] = useState({ w: 0, h: 0 })
   const [visible, setVisible] = useState(!lazy)
 
   useEffect(() => {
     const el = boxRef.current
     if (!el) return
     const ro = new ResizeObserver((entries) => {
-      for (const e of entries) setWidth(e.contentRect.width)
+      for (const e of entries) setSize({ w: e.contentRect.width, h: e.contentRect.height })
     })
     ro.observe(el)
     return () => ro.disconnect()
@@ -46,30 +54,44 @@ export function SlideFrame({ src, stageWidth, stageHeight, lazy = false, title, 
     return () => io.disconnect()
   }, [lazy, visible])
 
-  const scale = width > 0 ? width / stageWidth : 0
+  const scale =
+    fit === 'contain'
+      ? size.w > 0 && size.h > 0
+        ? Math.min(size.w / stageWidth, size.h / stageHeight)
+        : 0
+      : size.w > 0
+        ? size.w / stageWidth
+        : 0
+
+  const frame = visible && scale > 0 && (
+    <iframe
+      key={reloadKey}
+      src={src}
+      title={title}
+      sandbox="allow-same-origin"
+      tabIndex={-1}
+      className="absolute top-0 left-0 border-0 pointer-events-none"
+      style={{ width: stageWidth, height: stageHeight, transform: `scale(${scale})`, transformOrigin: 'top left' }}
+    />
+  )
+
+  if (fit === 'contain') {
+    const w = Math.floor(stageWidth * scale)
+    const h = Math.floor(stageHeight * scale)
+    return (
+      <div ref={boxRef} className="relative w-full h-full min-h-0 flex items-center justify-center" data-testid="slide-fit">
+        {scale > 0 && (
+          <div className={`relative overflow-hidden ${className}`} style={{ width: w, height: h, background: '#fff' }} data-testid="slide-stage">
+            {frame}
+          </div>
+        )}
+      </div>
+    )
+  }
 
   return (
-    <div
-      ref={boxRef}
-      className={`relative overflow-hidden ${className}`}
-      style={{ aspectRatio: `${stageWidth} / ${stageHeight}`, background: '#fff' }}
-    >
-      {visible && scale > 0 && (
-        <iframe
-          key={reloadKey}
-          src={src}
-          title={title}
-          sandbox="allow-same-origin"
-          tabIndex={-1}
-          className="absolute top-0 left-0 border-0 pointer-events-none"
-          style={{
-            width: stageWidth,
-            height: stageHeight,
-            transform: `scale(${scale})`,
-            transformOrigin: 'top left',
-          }}
-        />
-      )}
+    <div ref={boxRef} className={`relative overflow-hidden ${className}`} style={{ aspectRatio: `${stageWidth} / ${stageHeight}`, background: '#fff' }}>
+      {frame}
     </div>
   )
 }

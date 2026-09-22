@@ -44,8 +44,8 @@ export function SlideViewer({ t, preview, current, onChange, reloadKey }: Props)
   }
 
   return (
-    <div className="flex flex-col gap-2 min-h-0">
-      <div className="flex items-center gap-2 text-[12px] text-muted">
+    <div className="flex flex-col gap-2 min-h-0 flex-1">
+      <div className="flex items-center gap-2 text-[12px] text-muted flex-none">
         <SmallBtn onClick={prev} disabled={current === 0} aria-label={t('viewer.prev')}>
           ◂
         </SmallBtn>
@@ -60,14 +60,17 @@ export function SlideViewer({ t, preview, current, onChange, reloadKey }: Props)
         </span>
         <span className="ml-auto">{preview.css ? preview.css : t('viewer.default_theme')}</span>
       </div>
-      <SlideFrame
-        src={`${preview.baseUrl}/slide/${current}`}
-        stageWidth={preview.stage.width}
-        stageHeight={preview.stage.height}
-        title={preview.slides[current]}
-        reloadKey={reloadKey}
-        className="rounded-md border border-border w-full"
-      />
+      <div className="flex-1 min-h-0" style={{ minHeight: 120 }}>
+        <SlideFrame
+          src={`${preview.baseUrl}/slide/${current}`}
+          stageWidth={preview.stage.width}
+          stageHeight={preview.stage.height}
+          title={preview.slides[current]}
+          reloadKey={reloadKey}
+          fit="contain"
+          className="rounded-md border border-border"
+        />
+      </div>
     </div>
   )
 }
