@@ -20,11 +20,13 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import decks as deck_lib  # noqa: E402
@@ -34,7 +36,7 @@ import build as build_lib  # noqa: E402
 PREVIEWS = preview_lib.PreviewRegistry()
 
 APP_NAME = os.environ.get("KIROCREW_APP_NAME", "html-studio")
-APP_VERSION = "0.1.1"
+APP_VERSION = "0.1.2"
 PORT = int(os.environ.get("PORT", "9100"))
 HOME = Path(os.environ.get("KIROCREW_HOME", str(Path.home() / ".kiro" / "crew")))
 DATA_DIR = HOME / "apps" / APP_NAME / "data"
@@ -139,19 +141,66 @@ def route_roots(_h: "Handler", _body: dict[str, Any]) -> tuple[int, Any]:
 
 
 def route_roots_add(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
-    """Add a root. With ``{"path": ...}`` use that path; otherwise open the picker."""
+    """Add a root by path. Without a path, callers must use the async picker (/roots/pick)."""
     raw = body.get("path")
     if not isinstance(raw, str) or not raw.strip():
-        if not _picker_supported():
-            return 400, {"error": "picker_unsupported"}
-        raw = _pick_folder()
-        if raw is None:
-            return 200, {"cancelled": True, "roots": deck_lib.list_roots(DATA_DIR)}
+        return 400, {"error": "path_required"}
     try:
         roots = deck_lib.add_root(DATA_DIR, raw)
     except deck_lib.RootError as exc:
         return 400, {"error": exc.code, "detail": str(exc)}
     return 200, {"roots": roots, "added": str(deck_lib.validate_root(raw))}
+
+
+# --- async folder picker -------------------------------------------------
+# The gateway proxy times out after ~30s, but a user may keep the OS folder
+# dialog open far longer. So the dialog runs in a background thread and the
+# UI polls for its outcome instead of blocking one request on it.
+_PICKS: dict[str, dict[str, Any]] = {}
+_PICKS_LOCK = threading.Lock()
+_PICK_TTL = 600
+
+
+def _pick_worker(pick_id: str) -> None:
+    try:
+        path = _pick_folder()
+        if path is None:
+            outcome = {"state": "cancelled"}
+        else:
+            try:
+                roots = deck_lib.add_root(DATA_DIR, path)
+                outcome = {"state": "added", "roots": roots, "added": str(deck_lib.validate_root(path))}
+            except deck_lib.RootError as exc:
+                outcome = {"state": "error", "error": exc.code, "detail": str(exc)}
+    except Exception as exc:  # chooser failed to open, timeout, ...
+        outcome = {"state": "error", "error": "folder_chooser_failed", "detail": str(exc)}
+    with _PICKS_LOCK:
+        _PICKS[pick_id].update(outcome, finished=time.time())
+
+
+def route_roots_pick_start(_h: "Handler", _body: dict[str, Any]) -> tuple[int, Any]:
+    if not _picker_supported():
+        return 400, {"error": "picker_unsupported"}
+    pick_id = uuid.uuid4().hex[:12]
+    with _PICKS_LOCK:
+        # Drop stale records; refuse a second concurrent dialog.
+        now = time.time()
+        for k in [k for k, v in _PICKS.items() if v.get("finished") and now - v["finished"] > _PICK_TTL]:
+            _PICKS.pop(k, None)
+        if any(v["state"] == "pending" for v in _PICKS.values()):
+            return 409, {"error": "picker_busy"}
+        _PICKS[pick_id] = {"state": "pending", "started": now}
+    threading.Thread(target=_pick_worker, args=(pick_id,), daemon=True).start()
+    return 200, {"id": pick_id, "state": "pending"}
+
+
+def route_roots_pick_status(h: "Handler", _body: dict[str, Any]) -> tuple[int, Any]:
+    pick_id = parse_qs(urlsplit(h.path).query).get("id", [""])[0]
+    with _PICKS_LOCK:
+        rec = _PICKS.get(pick_id)
+        if rec is None:
+            return 404, {"error": "unknown_pick"}
+        return 200, {"id": pick_id, **{k: v for k, v in rec.items() if k not in ("started", "finished")}}
 
 
 def route_roots_remove(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
@@ -266,6 +315,8 @@ ROUTES: dict[tuple[str, str], Route] = {
     ("GET", "/status"): route_status,
     ("GET", "/roots"): route_roots,
     ("POST", "/roots/add"): route_roots_add,
+    ("POST", "/roots/pick"): route_roots_pick_start,
+    ("GET", "/roots/pick"): route_roots_pick_status,
     ("POST", "/roots/remove"): route_roots_remove,
     ("GET", "/decks"): route_decks,
     ("POST", "/preview/start"): route_preview_start,

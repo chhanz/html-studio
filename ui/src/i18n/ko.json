@@ -65,5 +65,10 @@
   "view.output_hint": "빌드된 덱을 표시 중입니다. 덱 자체 키로 이동하세요(보통 ← / →).",
   "build.hint.loading": "빌드 설정 확인 중…",
   "build.hint.single_file": "단일 파일 덱: 이미 빌드된 상태입니다. 다시 빌드하려면 studio.json에 빌드 명령을 추가하세요.",
-  "decks.kind.single": "단일 파일"
+  "decks.kind.single": "단일 파일",
+  "error.backend_unavailable": "백엔드가 실행 중이 아닙니다. App Store에서 앱을 끄고 다시 켜세요.",
+  "error.deck_not_allowed": "그 덱은 등록한 덱 폴더 안에 없습니다.",
+  "error.folder_chooser_failed": "폴더 선택 창을 열 수 없습니다.",
+  "error.picker_busy": "폴더 선택 창이 이미 열려 있습니다.",
+  "error.path_required": "경로를 입력하세요."
 }

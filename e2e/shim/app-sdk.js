@@ -39,10 +39,8 @@ async function request(path, init = {}) {
     data = text
   }
   if (!res.ok) {
-    const err = new Error(`HTTP ${res.status}`)
-    err.status = res.status
-    err.body = data
-    throw err
+    // Same shape as the dashboard SDK: a plain Error with "API <status>: <text>" and NO body.
+    throw new Error(`API ${res.status}: ${text}`)
   }
   return data
 }

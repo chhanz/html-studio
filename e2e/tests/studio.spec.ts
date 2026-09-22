@@ -45,6 +45,9 @@ test('rejects a root outside the home directory with a readable error', async ({
   await page.getByPlaceholder('~/Documents/decks').fill('/usr')
   await page.getByRole('button', { name: /^Add$/ }).click()
   await expect(page.getByRole('alert')).toContainText(/inside your home directory/)
+  // A 400 from the backend is NOT a connection problem: status stays green.
+  await expect(page.getByRole('status')).toContainText(/Backend connected/)
+  await expect(page.getByRole('alert')).not.toContainText(/unreachable|not running/)
 })
 
 test('previews a slides deck: thumbnails, viewer, keyboard, image resolves', async ({ page }) => {

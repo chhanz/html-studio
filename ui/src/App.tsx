@@ -30,6 +30,7 @@ export default function HtmlStudio() {
   const [decks, setDecks] = useState<Deck[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [errorDetail, setErrorDetail] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useCollapsed('sidebar', true)
   // null = leave the section's own persisted state alone
@@ -193,13 +194,28 @@ export default function HtmlStudio() {
   const addRoot = useCallback(
     async (path?: string) => {
       setError(null)
+      setErrorDetail(null)
       setLoading(true)
       try {
-        const res = await client.addRoot(path)
-        if (res.cancelled) return
-        setRoots(res.roots)
+        if (path) {
+          const res = await client.addRoot(path)
+          setRoots(res.roots)
+        } else {
+          // The OS dialog may stay open far longer than the gateway proxy allows
+          // a single request to take, so start it and poll for the outcome.
+          const start = await client.pickStart()
+          let st = start
+          while (st.state === 'pending') {
+            await new Promise((r) => setTimeout(r, 700))
+            st = await client.pickStatus(start.id)
+          }
+          if (st.state === 'cancelled') return
+          if (st.state === 'error') throw new ApiError(st.error ?? 'folder_chooser_failed', st.detail)
+          setRoots(st.roots ?? [])
+        }
       } catch (e) {
         setError(e instanceof ApiError ? e.code : 'request_failed')
+        setErrorDetail(e instanceof ApiError ? e.message : String(e))
         return
       } finally {
         setLoading(false)
@@ -334,6 +350,7 @@ export default function HtmlStudio() {
                   selectedId={selectedId}
                   loading={loading}
                   error={error}
+                  errorDetail={errorDetail}
                   pickerSupported={status?.pickerSupported ?? /Mac/i.test(navigator.platform)}
                   connected={conn === 'connected'}
                   onSelect={selectDeck}

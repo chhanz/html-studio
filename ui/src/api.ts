@@ -19,7 +19,8 @@ export type Deck = {
   modifiedAt: number
 }
 
-export type RootsResponse = { roots: string[]; pickerSupported?: boolean; added?: string; cancelled?: boolean }
+export type RootsResponse = { roots: string[]; pickerSupported?: boolean; added?: string }
+export type PickStatus = { id: string; state: 'pending' | 'added' | 'cancelled' | 'error'; roots?: string[]; added?: string; error?: string; detail?: string }
 export type DecksResponse = { roots: string[]; decks: Deck[] }
 export type PreviewInfo = {
   port: number
@@ -59,11 +60,33 @@ export class ApiError extends Error {
   }
 }
 
-/** Unwrap the app-sdk error shape into a stable error code. */
+/** Unwrap the app-sdk error shape into a stable error code.
+ *
+ * The dashboard SDK throws `Error("API <status>: <response text>")` for any
+ * non-2xx response (no structured body). Recover the backend's `{"error": ...}`
+ * from that text so the UI can show the real reason instead of a generic one.
+ */
 function toApiError(err: unknown): ApiError {
-  const anyErr = err as { body?: { error?: string; detail?: string }; message?: string }
-  const code = anyErr?.body?.error ?? 'request_failed'
-  return new ApiError(code, anyErr?.body?.detail ?? anyErr?.message, anyErr?.body as Record<string, unknown> | undefined)
+  const anyErr = err as { body?: { error?: string; detail?: string }; message?: string; status?: number }
+  if (anyErr?.body?.error) {
+    return new ApiError(anyErr.body.error, anyErr.body.detail, anyErr.body as Record<string, unknown>)
+  }
+  const msg = String(anyErr?.message ?? '')
+  const m = /^API (\d{3}): ([\s\S]*)$/.exec(msg)
+  if (m) {
+    const status = Number(m[1])
+    let body: Record<string, unknown> | undefined
+    try {
+      body = JSON.parse(m[2])
+    } catch {
+      body = undefined
+    }
+    const code =
+      (typeof body?.error === 'string' && body.error) ||
+      (status === 502 || status === 503 || status === 504 ? 'backend_unavailable' : `http_${status}`)
+    return new ApiError(code, typeof body?.detail === 'string' ? body.detail : msg, body)
+  }
+  return new ApiError('request_failed', msg || undefined)
 }
 
 export function makeClient(api: AppApi) {
@@ -77,7 +100,9 @@ export function makeClient(api: AppApi) {
   return {
     status: () => wrap(api.get<BackendStatus>(`${API}/status`)),
     roots: () => wrap(api.get<RootsResponse>(`${API}/roots`)),
-    addRoot: (path?: string) => wrap(api.post<RootsResponse>(`${API}/roots/add`, path ? { path } : {})),
+    addRoot: (path: string) => wrap(api.post<RootsResponse>(`${API}/roots/add`, { path })),
+    pickStart: () => wrap(api.post<PickStatus>(`${API}/roots/pick`, {})),
+    pickStatus: (id: string) => wrap(api.get<PickStatus>(`${API}/roots/pick?id=${encodeURIComponent(id)}`)),
     removeRoot: (path: string) => wrap(api.post<RootsResponse>(`${API}/roots/remove`, { path })),
     decks: () => wrap(api.get<DecksResponse>(`${API}/decks`)),
     previewStart: (path: string) => wrap(api.post<PreviewInfo>(`${API}/preview/start`, { path })),

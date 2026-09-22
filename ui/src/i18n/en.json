@@ -65,5 +65,10 @@
   "view.output_hint": "Showing the built deck. Use its own keys to navigate (usually ← / →).",
   "build.hint.loading": "Checking build settings…",
   "build.hint.single_file": "Single-file deck: already built. Add a build command in studio.json to rebuild it.",
-  "decks.kind.single": "single file"
+  "decks.kind.single": "single file",
+  "error.backend_unavailable": "The backend is not running. Turn the app off and on in the App Store.",
+  "error.deck_not_allowed": "That deck is not inside one of your deck folders.",
+  "error.folder_chooser_failed": "The folder chooser could not be opened.",
+  "error.picker_busy": "A folder chooser is already open.",
+  "error.path_required": "Enter a path."
 }

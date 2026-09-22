@@ -13,6 +13,7 @@ type Props = {
   selectedId: string | null
   loading: boolean
   error: string | null
+  errorDetail?: string | null
   pickerSupported: boolean
   connected: boolean
   onSelect: (deck: Deck) => void
@@ -118,6 +119,9 @@ export function DeckPanel(p: Props) {
       {p.error && (
         <p className="m-0 text-[12px]" style={{ color: 'var(--danger)' }} role="alert">
           {t(`error.${p.error}`) === `error.${p.error}` ? t('error.generic', { code: p.error }) : t(`error.${p.error}`)}
+          {p.errorDetail && t(`error.${p.error}`) === `error.${p.error}` ? (
+            <span className="block text-muted break-all">{p.errorDetail}</span>
+          ) : null}
         </p>
       )}
 

@@ -105,7 +105,7 @@ class ServerTest(unittest.TestCase):
         code, data = self.request("GET", "/api/status", signed=True)
         self.assertEqual(code, 200)
         self.assertEqual(data["app"], "html-studio")
-        self.assertEqual(data["version"], "0.1.1")
+        self.assertEqual(data["version"], "0.1.2")
         self.assertTrue(data["dataDir"].startswith(self.tmp.name))
 
     def test_signed_unknown_route_is_404(self) -> None:
@@ -144,10 +144,15 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(code, 400)
         self.assertEqual(data["error"], "not_found")
 
-    def test_roots_add_without_path_and_picker_disabled(self) -> None:
+    def test_roots_add_without_path_is_rejected(self) -> None:
         code, data = self.request("POST", "/api/roots/add", signed=True, body=b"{}")
-        self.assertEqual(code, 400)
-        self.assertEqual(data["error"], "picker_unsupported")
+        self.assertEqual((code, data["error"]), (400, "path_required"))
+
+    def test_roots_pick_unsupported_here(self) -> None:
+        code, data = self.request("POST", "/api/roots/pick", signed=True, body=b"{}")
+        self.assertEqual((code, data["error"]), (400, "picker_unsupported"))
+        code, data = self.request("GET", "/api/roots/pick?id=nope", signed=True)
+        self.assertEqual((code, data["error"]), (404, "unknown_pick"))
 
     def test_preview_start_requires_registered_root(self) -> None:
         home = Path.home()
