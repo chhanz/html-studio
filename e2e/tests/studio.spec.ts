@@ -151,3 +151,38 @@ test('single-file deck: previews sections, build is disabled with a hint', async
   // Built output is viewable immediately: the file is the output.
   await expect(page.getByRole('group', { name: /^View$/ })).toBeVisible()
 })
+
+test('present opens the built deck in a popup at the current slide', async ({ page, context }) => {
+  await openApp(page)
+  await addFixtureRoot(page)
+  await selectDeck(page, 'acme-quarterly')
+  const present = page.getByRole('button', { name: /^Present$/ })
+  await page.getByRole('button', { name: /^Build$/ }).click()
+  await expect(page.getByRole('status').filter({ hasText: /Build succeeded/ })).toBeVisible()
+  await page.getByRole('group', { name: /^View$/ }).getByRole('button', { name: /^Slides$/ }).click()
+  await page.keyboard.press('ArrowRight')
+  await page.keyboard.press('ArrowRight')
+  await expect(page.getByText('3 / 4')).toBeVisible()
+
+  const popupPromise = context.waitForEvent('page')
+  await present.click()
+  const popup = await popupPromise
+  await popup.waitForLoadState()
+  expect(popup.url()).toMatch(/\/out\/index\.html#3$/)
+  await expect(popup.locator('.slide.active')).toContainText('Uptime')
+  await expect(popup.locator('#hs-counter')).toHaveText('3 / 4')
+  await popup.close()
+})
+
+test('exports the built deck to PDF', async ({ page }) => {
+  await openApp(page)
+  await addFixtureRoot(page)
+  await selectDeck(page, 'acme-quarterly')
+  await page.getByRole('button', { name: /^Build$/ }).click()
+  await expect(page.getByRole('status').filter({ hasText: /Build succeeded/ })).toBeVisible()
+  await page.getByRole('button', { name: /^PDF$/ }).click()
+  const done = page.getByRole('status').filter({ hasText: /PDF saved/ })
+  await expect(done).toBeVisible({ timeout: 60_000 })
+  await expect(done).toContainText(/acme-quarterly\.pdf/)
+  await expect(page.getByRole('button', { name: /Show in folder/ })).toBeVisible()
+})

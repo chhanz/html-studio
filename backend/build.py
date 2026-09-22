@@ -146,7 +146,7 @@ def run_external(deck: Path, command: str, output: str) -> dict[str, Any]:
 _RUNTIME_JS = """
 (function(){var s=[].slice.call(document.querySelectorAll('.slide')),i=0;
 function show(n){i=Math.max(0,Math.min(s.length-1,n));s.forEach(function(e,k){e.classList.toggle('active',k===i)});
-var c=document.getElementById('hs-counter');if(c)c.textContent=(i+1)+' / '+s.length;history.replaceState(null,'','#'+(i+1));}
+var c=document.getElementById('hs-counter');if(c)c.textContent=(i+1)+' / '+s.length;history.replaceState(null,'',location.pathname+location.search+'#'+(i+1));}
 function fit(){var st=document.querySelector('.hs-stage');if(!st)return;var k=Math.min(innerWidth/1280,innerHeight/720);st.style.transform='scale('+k+')';}
 addEventListener('keydown',function(e){if(e.key==='ArrowRight'||e.key==='PageDown'||e.key===' ')show(i+1);
 else if(e.key==='ArrowLeft'||e.key==='PageUp')show(i-1);else if(e.key==='Home')show(0);else if(e.key==='End')show(s.length-1);});

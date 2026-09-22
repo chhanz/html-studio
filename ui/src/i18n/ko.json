@@ -71,5 +71,15 @@
   "error.folder_chooser_failed": "폴더 선택 창을 열 수 없습니다.",
   "error.picker_busy": "폴더 선택 창이 이미 열려 있습니다.",
   "error.path_required": "경로를 입력하세요.",
-  "error.unknown_route": "실행 중인 백엔드가 앱 UI보다 오래된 버전입니다. App Store에서 앱을 끄고 다시 켜 백엔드를 재시작하세요."
+  "error.unknown_route": "실행 중인 백엔드가 앱 UI보다 오래된 버전입니다. App Store에서 앱을 끄고 다시 켜 백엔드를 재시작하세요.",
+  "present.hint": "현재 슬라이드부터 빌드된 덱을 전체화면으로 열기",
+  "present.need_output": "먼저 덱을 빌드하세요",
+  "pdf.hint": "빌드된 덱을 PDF로 내보내기",
+  "pdf.done": "PDF 저장됨 ({kb} KB)",
+  "pdf.reveal": "폴더에서 보기",
+  "error.no_output": "먼저 덱을 빌드하세요.",
+  "error.no_browser": "헤드리스 Chromium을 찾을 수 없습니다. Google Chrome을 설치하거나 HTML_STUDIO_CHROME에 Chromium 경로를 지정하세요.",
+  "error.pdf_timeout": "PDF 렌더링 시간이 초과되었습니다.",
+  "error.pdf_failed": "PDF 렌더링에 실패했습니다.",
+  "error.open_failed": "시스템 브라우저를 열 수 없습니다."
 }

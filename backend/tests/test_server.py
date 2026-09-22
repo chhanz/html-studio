@@ -105,7 +105,7 @@ class ServerTest(unittest.TestCase):
         code, data = self.request("GET", "/api/status", signed=True)
         self.assertEqual(code, 200)
         self.assertEqual(data["app"], "html-studio")
-        self.assertEqual(data["version"], "0.1.3")
+        self.assertEqual(data["version"], "0.1.4")
         self.assertTrue(data["dataDir"].startswith(self.tmp.name))
 
     def test_signed_unknown_route_is_404(self) -> None:
@@ -191,6 +191,28 @@ class ServerTest(unittest.TestCase):
             code, data = self.request("POST", "/api/build", signed=True, body=trust_body)
             self.assertEqual((code, data["ok"], data["mode"]), (200, True, "external"), data)
 
+            # Reveal refuses paths outside the deck.
+            code, data = self.request("POST", "/api/reveal", signed=True,
+                                      body=json.dumps({"path": str(deck), "file": "../secret"}).encode())
+            self.assertEqual(code, 404)
+
+            self.request("POST", "/api/roots/remove", signed=True,
+                         body=json.dumps({"path": str(Path(root).resolve())}).encode())
+
+    def test_present_and_pdf_require_output(self) -> None:
+        home = Path.home()
+        with tempfile.TemporaryDirectory(dir=home) as root:
+            deck = Path(root) / "deck"
+            (deck / "slides").mkdir(parents=True)
+            (deck / "slides" / "010.html").write_text("<section class='slide'>x</section>")
+            self.request("POST", "/api/roots/add", signed=True, body=json.dumps({"path": root}).encode())
+            body = json.dumps({"path": str(deck)}).encode()
+            code, data = self.request("POST", "/api/present", signed=True, body=body)
+            self.assertEqual((code, data["error"]), (409, "no_output"))
+            code, data = self.request("POST", "/api/pdf", signed=True, body=body)
+            self.assertIn(data["error"], ("no_output", "no_browser"))
+            code, data = self.request("GET", "/api/pdf?id=nope", signed=True)
+            self.assertEqual((code, data["error"]), (404, "unknown_job"))
             self.request("POST", "/api/roots/remove", signed=True,
                          body=json.dumps({"path": str(Path(root).resolve())}).encode())
 

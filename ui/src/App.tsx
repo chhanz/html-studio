@@ -1,7 +1,7 @@
 import { useAppApi } from '@kirocrew/app-sdk'
 import { Card, CardTitle, PageHeader } from '@kirocrew/app-sdk/ui'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ApiError, type BackendStatus, type BuildInfo, type BuildResult, type Deck, type PreviewInfo, makeClient } from './api'
+import { ApiError, type BackendStatus, type BuildInfo, type BuildResult, type Deck, type PdfJob, type PreviewInfo, makeClient } from './api'
 import { BuildPanel } from './components/BuildPanel'
 import { DeckPanel } from './components/DeckPanel'
 import { Section, useCollapsed } from './components/Section'
@@ -127,6 +127,46 @@ export default function HtmlStudio() {
     }
   }
 
+  const outputUrl = preview && buildInfo?.outputExists ? `${preview.baseUrl}/${buildInfo.output}` : null
+
+  // --- present / pdf
+  const [pdf, setPdf] = useState<PdfJob | null>(null)
+  const [pdfError, setPdfError] = useState<string | null>(null)
+  useEffect(() => {
+    setPdf(null)
+    setPdfError(null)
+  }, [selected?.path])
+
+  const present = useCallback(() => {
+    if (!selected || !outputUrl) return
+    // Slide numbers are 1-based in deck runtimes; only meaningful for slides decks
+    // whose output preserves the order (true for both assemblers).
+    const url = `${outputUrl}#${current + 1}`
+    // Prefer a real popup so the deck runs full-screen in its own window; the
+    // dashboard (Electron) may deny window.open, in which case fall back to the
+    // system browser via the backend.
+    const win = window.open(url, 'html-studio-present', 'popup=yes,width=1280,height=720')
+    if (!win) void client.present(selected.path, current + 1).catch((e) => setPdfError(e instanceof ApiError ? e.code : 'request_failed'))
+  }, [client, selected, outputUrl, current])
+
+  const exportPdf = useCallback(async () => {
+    if (!selected) return
+    setPdfError(null)
+    try {
+      let job = await client.pdfStart(selected.path)
+      setPdf(job)
+      while (job.state === 'running') {
+        await new Promise((r) => setTimeout(r, 1000))
+        job = await client.pdfStatus(job.id)
+        setPdf(job)
+      }
+      if (job.state === 'error') setPdfError(job.error ?? 'pdf_failed')
+    } catch (e) {
+      setPdf(null)
+      setPdfError(e instanceof ApiError ? e.code : 'request_failed')
+    }
+  }, [client, selected])
+
   const canBuild = !!selected && !!preview && preview.slides.length > 0 && !building && (buildInfo?.buildable ?? false)
   const buildHint = !selected
     ? ''
@@ -137,7 +177,6 @@ export default function HtmlStudio() {
         : buildInfo.builtin
           ? t('build.mode.builtin')
           : buildInfo.command ?? '' 
-  const outputUrl = preview && buildInfo?.outputExists ? `${preview.baseUrl}/${buildInfo.output}` : null
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -436,13 +475,44 @@ export default function HtmlStudio() {
                 {building && <Spinner />}
                 {t('toolbar.build')}
               </SmallBtn>
-              {(['toolbar.check', 'toolbar.present', 'toolbar.pdf'] as const).map((k) => (
-                <SmallBtn key={k} disabled>
-                  {t(k)}
-                </SmallBtn>
-              ))}
+              <SmallBtn disabled>{t('toolbar.check')}</SmallBtn>
+              <SmallBtn onClick={present} disabled={!outputUrl} title={outputUrl ? t('present.hint') : t('present.need_output')}>
+                {t('toolbar.present')}
+              </SmallBtn>
+              <SmallBtn
+                onClick={() => void exportPdf()}
+                disabled={!outputUrl || pdf?.state === 'running'}
+                title={outputUrl ? t('pdf.hint') : t('present.need_output')}
+                className="inline-flex items-center gap-1.5"
+              >
+                {pdf?.state === 'running' && <Spinner />}
+                {t('toolbar.pdf')}
+              </SmallBtn>
             </div>
           </div>
+          {selected && (pdf?.state === 'done' || pdfError) && (
+            <div
+              className="mb-2 flex-none rounded-md border p-2 text-[12px] flex items-center gap-2 flex-wrap"
+              style={{ borderColor: pdfError ? 'var(--danger)' : 'var(--ok)' }}
+              role="status"
+            >
+              {pdfError ? (
+                <span style={{ color: 'var(--danger)' }}>
+                  {t(`error.${pdfError}`) === `error.${pdfError}` ? t('error.generic', { code: pdfError }) : t(`error.${pdfError}`)}
+                  {pdf?.detail ? <span className="block text-muted break-all">{pdf.detail}</span> : null}
+                </span>
+              ) : (
+                <>
+                  <span style={{ color: 'var(--ok)' }}>{t('pdf.done', { kb: Math.round((pdf?.bytes ?? 0) / 1024) })}</span>
+                  <span className="text-muted break-all">{pdf?.output}</span>
+                  <SmallBtn onClick={() => pdf?.output && selected && void client.reveal(selected.path, pdf.output.slice(selected.path.length + 1))}>
+                    {t('pdf.reveal')}
+                  </SmallBtn>
+                </>
+              )}
+              <SmallBtn className="ml-auto" onClick={() => { setPdf(null); setPdfError(null) }} aria-label={t('build.dismiss')}>✕</SmallBtn>
+            </div>
+          )}
           {selected && (buildResult || pendingCommand) && (
             <div className="mb-2 flex-none">
               <BuildPanel

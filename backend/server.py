@@ -32,11 +32,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import decks as deck_lib  # noqa: E402
 import preview as preview_lib  # noqa: E402
 import build as build_lib  # noqa: E402
+import export as export_lib  # noqa: E402
+
+PDF_JOBS = export_lib.ExportJobs()
 
 PREVIEWS = preview_lib.PreviewRegistry()
 
 APP_NAME = os.environ.get("KIROCREW_APP_NAME", "html-studio")
-APP_VERSION = "0.1.3"
+APP_VERSION = "0.1.4"
 PORT = int(os.environ.get("PORT", "9100"))
 HOME = Path(os.environ.get("KIROCREW_HOME", str(Path.home() / ".kiro" / "crew")))
 DATA_DIR = HOME / "apps" / APP_NAME / "data"
@@ -314,6 +317,77 @@ def route_build(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
     return 200, result
 
 
+# --- present / pdf --------------------------------------------------------
+def _output_url(deck: Path) -> tuple[str, str] | None:
+    """(preview base url, output rel) for a deck whose output exists; None otherwise."""
+    info = deck_lib.describe_deck(deck, deck)
+    if info is None:
+        return None
+    contract = build_lib.build_contract(deck, info.get("entry"))
+    if not contract["outputExists"]:
+        return None
+    p = PREVIEWS.ensure(deck, info["slidesDir"], _deck_css(deck), extra_files=(contract["output"],), entry=info.get("entry"))
+    return f"http://127.0.0.1:{p.port}", contract["output"]
+
+
+def route_present(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
+    """Open the built deck in the system browser (fallback when the dashboard blocks window.open)."""
+    deck = _deck_under_roots(str(body.get("path", "")))
+    if deck is None:
+        return 400, {"error": "deck_not_allowed"}
+    target = _output_url(deck)
+    if target is None:
+        return 409, {"error": "no_output"}
+    base, output = target
+    slide = body.get("slide")
+    frag = f"#{int(slide)}" if isinstance(slide, int) and slide > 0 else ""
+    url = f"{base}/{output}{frag}"
+    opener = ["open", url] if sys.platform == "darwin" else ["xdg-open", url]
+    try:
+        subprocess.Popen(opener, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError as exc:
+        return 500, {"error": "open_failed", "detail": str(exc)}
+    return 200, {"url": url}
+
+
+def route_pdf_start(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
+    deck = _deck_under_roots(str(body.get("path", "")))
+    if deck is None:
+        return 400, {"error": "deck_not_allowed"}
+    browser = export_lib.find_browser()
+    if browser is None:
+        return 400, {"error": "no_browser"}
+    target = _output_url(deck)
+    if target is None:
+        return 409, {"error": "no_output"}
+    base, output = target
+    out_path = deck / export_lib.safe_pdf_name(deck.name)
+    job_id = PDF_JOBS.start(browser, f"{base}/{output}", out_path)
+    return 200, {"id": job_id, "state": "running", "output": str(out_path)}
+
+
+def route_pdf_status(h: "Handler", _body: dict[str, Any]) -> tuple[int, Any]:
+    job_id = parse_qs(urlsplit(h.path).query).get("id", [""])[0]
+    rec = PDF_JOBS.status(job_id)
+    if rec is None:
+        return 404, {"error": "unknown_job"}
+    return 200, rec
+
+
+def route_reveal(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
+    """Reveal a produced file (PDF) in the OS file manager."""
+    deck = _deck_under_roots(str(body.get("path", "")))
+    target = str(body.get("file", ""))
+    if deck is None or not target:
+        return 400, {"error": "deck_not_allowed"}
+    file = (deck / target).resolve()
+    if deck.resolve() not in file.parents or not file.is_file():
+        return 404, {"error": "not_found"}
+    opener = ["open", "-R", str(file)] if sys.platform == "darwin" else ["xdg-open", str(file.parent)]
+    subprocess.Popen(opener, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return 200, {"revealed": str(file)}
+
+
 ROUTES: dict[tuple[str, str], Route] = {
     ("GET", "/health"): route_health,
     ("GET", "/status"): route_status,
@@ -327,6 +401,10 @@ ROUTES: dict[tuple[str, str], Route] = {
     ("POST", "/preview/stop"): route_preview_stop,
     ("POST", "/build/info"): route_build_info,
     ("POST", "/build"): route_build,
+    ("POST", "/present"): route_present,
+    ("POST", "/pdf"): route_pdf_start,
+    ("GET", "/pdf"): route_pdf_status,
+    ("POST", "/reveal"): route_reveal,
 }
 
 # Routes reachable without the gateway signature (gateway health probe only).

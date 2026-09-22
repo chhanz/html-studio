@@ -54,6 +54,8 @@ export type BuildResult = {
   stderr?: string
 }
 
+export type PdfJob = { id: string; state: 'running' | 'done' | 'error'; output?: string; bytes?: number; error?: string; detail?: string }
+
 export class ApiError extends Error {
   constructor(public code: string, message?: string, public body?: Record<string, unknown>) {
     super(message ?? code)
@@ -109,6 +111,10 @@ export function makeClient(api: AppApi) {
     previewStop: (path: string) => wrap(api.post<{ stopped: boolean }>(`${API}/preview/stop`, { path })),
     buildInfo: (path: string) => wrap(api.post<BuildInfo>(`${API}/build/info`, { path })),
     build: (path: string, trust = false) => wrap(api.post<BuildResult>(`${API}/build`, { path, trust })),
+    present: (path: string, slide?: number) => wrap(api.post<{ url: string }>(`${API}/present`, { path, slide })),
+    pdfStart: (path: string) => wrap(api.post<PdfJob>(`${API}/pdf`, { path })),
+    pdfStatus: (id: string) => wrap(api.get<PdfJob>(`${API}/pdf?id=${encodeURIComponent(id)}`)),
+    reveal: (path: string, file: string) => wrap(api.post<{ revealed: string }>(`${API}/reveal`, { path, file })),
   }
 }
 
