@@ -14,6 +14,7 @@ type Props = {
   loading: boolean
   error: string | null
   pickerSupported: boolean
+  connected: boolean
   onSelect: (deck: Deck) => void
   onAddRoot: (path?: string) => Promise<void>
   onRemoveRoot: (path: string) => Promise<void>
@@ -78,16 +79,16 @@ export function DeckPanel(p: Props) {
       {/* Add root: OS picker where available, typed path as the fallback */}
       <div className="flex flex-wrap items-center gap-1">
         {p.pickerSupported ? (
-          <SmallBtn onClick={pick} disabled={busy} className="inline-flex items-center gap-1.5">
+          <SmallBtn onClick={pick} disabled={busy || !p.connected} className="inline-flex items-center gap-1.5">
             {busy && <Spinner />}
             {busy ? t('roots.picking') : t('roots.add')}
           </SmallBtn>
         ) : (
-          <SmallBtn onClick={() => setTyping((v) => !v)} active={typing} disabled={busy}>
+          <SmallBtn onClick={() => setTyping((v) => !v)} active={typing} disabled={busy || !p.connected}>
             {t('roots.add')}
           </SmallBtn>
         )}
-        <SmallBtn onClick={() => p.onRefresh()} disabled={busy || p.loading} className="inline-flex items-center gap-1.5">
+        <SmallBtn onClick={() => p.onRefresh()} disabled={busy || p.loading || !p.connected} className="inline-flex items-center gap-1.5">
           {p.loading && !busy && <Spinner />}
           {t('roots.refresh')}
         </SmallBtn>
@@ -121,7 +122,11 @@ export function DeckPanel(p: Props) {
       )}
 
       {/* Deck list */}
-      {p.roots.length === 0 ? (
+      {!p.connected ? (
+        <p className="m-0 text-muted inline-flex items-center gap-2">
+          <Spinner /> {t('status.connecting')}
+        </p>
+      ) : p.roots.length === 0 ? (
         <p className="m-0 text-muted">{t('panel.decks.empty')}</p>
       ) : p.loading && p.decks.length === 0 ? (
         <p className="m-0 text-muted">{t('decks.loading')}</p>
@@ -154,6 +159,7 @@ export function DeckPanel(p: Props) {
                   </div>
                   <div className="text-[11px] text-muted truncate">
                     {fmtDate(d.modifiedAt, p.locale)}
+                    {d.kind === 'single' ? ` · ${t('decks.kind.single')}` : ''}
                     {d.hasDesignMd ? ' · DESIGN.md' : ''}
                     {d.hasStudioJson ? ' · studio.json' : ''}
                   </div>

@@ -11,6 +11,7 @@ escape the home directory are refused.
 from __future__ import annotations
 
 import json
+import re
 import os
 from pathlib import Path
 from typing import Any
@@ -111,6 +112,35 @@ def _slide_files(slides_dir: Path) -> list[Path]:
     return sorted(p for p in slides_dir.iterdir() if p.is_file() and p.suffix.lower() == ".html")
 
 
+_SECTION_CLASS_RE = re.compile(r"""<section\b[^>]*\bclass=(["'])(.*?)\1""", re.I | re.S)
+
+
+def _count_slide_sections(text: str) -> int:
+    return sum(1 for m in _SECTION_CLASS_RE.finditer(text) if "slide" in m.group(2).split())
+
+
+def single_file_entry(deck_dir: Path) -> tuple[Path, int] | None:
+    """Return (entry_html, slide_count) when *deck_dir* holds a built single-file deck.
+
+    A single-file deck is an ``index.html`` (else the only ``*.html`` at the deck
+    root) containing at least two ``<section class="... slide ...">`` blocks.
+    """
+    candidates = [deck_dir / "index.html"] if (deck_dir / "index.html").is_file() else sorted(
+        p for p in deck_dir.glob("*.html") if p.is_file()
+    )
+    if not candidates or len(candidates) > 1 and candidates[0].name != "index.html":
+        return None
+    entry = candidates[0]
+    try:
+        if entry.stat().st_size > 20 * 1024 * 1024:
+            return None
+        text = entry.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    count = _count_slide_sections(text)
+    return (entry, count) if count >= 2 else None
+
+
 def describe_deck(deck_dir: Path, root: Path) -> dict[str, Any] | None:
     """Return deck metadata if *deck_dir* is a deck, else None."""
     studio = _read_studio(deck_dir)
@@ -125,17 +155,28 @@ def describe_deck(deck_dir: Path, root: Path) -> dict[str, Any] | None:
         slides_dir = deck_dir / DEFAULT_SLIDES_DIR
         slides_dir_name = DEFAULT_SLIDES_DIR
     slides = _slide_files(slides_dir)
-    if studio is None and not slides:
-        return None
+    kind = "slides"
+    entry: str | None = None
+    slide_names = [p.name for p in slides]
     mtimes = [p.stat().st_mtime for p in slides] + [deck_dir.stat().st_mtime]
+    if studio is None and not slides:
+        single = single_file_entry(deck_dir)
+        if single is None:
+            return None
+        entry_path, count = single
+        kind, entry = "single", entry_path.name
+        slide_names = [f"{entry}#{i + 1}" for i in range(count)]
+        mtimes.append(entry_path.stat().st_mtime)
     return {
         "id": str(deck_dir),
         "name": deck_dir.name,
         "path": str(deck_dir),
         "root": str(root),
+        "kind": kind,
+        "entry": entry,
         "slidesDir": slides_dir_name,
-        "slideCount": len(slides),
-        "slides": [p.name for p in slides],
+        "slideCount": len(slide_names),
+        "slides": slide_names,
         "hasStudioJson": studio is not None,
         "hasDesignMd": (deck_dir / "DESIGN.md").is_file(),
         "modifiedAt": max(mtimes),

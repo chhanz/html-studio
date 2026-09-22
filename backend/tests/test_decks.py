@@ -127,6 +127,29 @@ class ScanTests(unittest.TestCase):
             make_deck(self.root / f"d{i}", slides=1)
         self.assertEqual(len(decks.scan_decks([str(self.root)], limit=3)), 3)
 
+    def test_single_file_deck(self) -> None:
+        d = self.root / "built"
+        d.mkdir()
+        (d / "index.html").write_text(
+            "<html><head><link rel='stylesheet' href='assets/deck.css'></head><body>"
+            "<section class='slide cover active'>a</section><section class='slide'>b</section>"
+            "<section class='slide'>c</section></body></html>"
+        )
+        (self.root / "page").mkdir()
+        (self.root / "page" / "index.html").write_text("<html><body><section class='slide'>only one</section></body></html>")
+        found = {x["name"]: x for x in decks.scan_decks([str(self.root)])}
+        self.assertIn("built", found)
+        self.assertNotIn("page", found)  # one section is a web page, not a deck
+        b = found["built"]
+        self.assertEqual((b["kind"], b["entry"], b["slideCount"]), ("single", "index.html", 3))
+        self.assertEqual(b["slides"], ["index.html#1", "index.html#2", "index.html#3"])
+
+    def test_slides_dir_wins_over_single_file(self) -> None:
+        d = make_deck(self.root / "both", slides=2)
+        (d / "index.html").write_text("<section class='slide'>x</section><section class='slide'>y</section>")
+        found = decks.scan_decks([str(self.root)])[0]
+        self.assertEqual((found["kind"], found["entry"], found["slideCount"]), ("slides", None, 2))
+
 
 if __name__ == "__main__":
     unittest.main()

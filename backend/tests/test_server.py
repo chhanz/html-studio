@@ -105,7 +105,7 @@ class ServerTest(unittest.TestCase):
         code, data = self.request("GET", "/api/status", signed=True)
         self.assertEqual(code, 200)
         self.assertEqual(data["app"], "html-studio")
-        self.assertEqual(data["version"], "0.1.0")
+        self.assertEqual(data["version"], "0.1.1")
         self.assertTrue(data["dataDir"].startswith(self.tmp.name))
 
     def test_signed_unknown_route_is_404(self) -> None:
@@ -170,6 +170,23 @@ class ServerTest(unittest.TestCase):
 
             code, data = self.request("POST", "/api/preview/stop", signed=True, body=body)
             self.assertEqual((code, data["stopped"]), (200, True))
+
+            # Build: no studio.json -> builtin assembler, no consent needed.
+            code, info = self.request("POST", "/api/build/info", signed=True, body=body)
+            self.assertEqual((code, info["builtin"], info["trusted"]), (200, True, False))
+            code, data = self.request("POST", "/api/build", signed=True, body=body)
+            self.assertEqual((code, data["ok"], data["mode"]), (200, True, "builtin"), data)
+            self.assertTrue((deck / "out" / "index.html").is_file())
+
+            # External command: 409 until trusted.
+            (deck / "studio.json").write_text(json.dumps({"build": "mkdir -p out && echo x > out/index.html"}))
+            code, data = self.request("POST", "/api/build", signed=True, body=body)
+            self.assertEqual((code, data["ok"], data["needsTrust"], data["error"]), (200, False, True, "untrusted_command"))
+            self.assertIn("mkdir", data["command"])
+            trust_body = json.dumps({"path": str(deck), "trust": True}).encode()
+            code, data = self.request("POST", "/api/build", signed=True, body=trust_body)
+            self.assertEqual((code, data["ok"], data["mode"]), (200, True, "external"), data)
+
             self.request("POST", "/api/roots/remove", signed=True,
                          body=json.dumps({"path": str(Path(root).resolve())}).encode())
 

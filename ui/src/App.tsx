@@ -1,7 +1,8 @@
 import { useAppApi } from '@kirocrew/app-sdk'
 import { Card, CardTitle, PageHeader } from '@kirocrew/app-sdk/ui'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ApiError, type BackendStatus, type Deck, type PreviewInfo, makeClient } from './api'
+import { ApiError, type BackendStatus, type BuildInfo, type BuildResult, type Deck, type PreviewInfo, makeClient } from './api'
+import { BuildPanel } from './components/BuildPanel'
 import { DeckPanel } from './components/DeckPanel'
 import { Section, useCollapsed } from './components/Section'
 import { SlideStrip } from './components/SlideStrip'
@@ -62,6 +63,81 @@ export default function HtmlStudio() {
     }
   }, [client, selected?.path]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // --- build state
+  const [buildInfo, setBuildInfo] = useState<BuildInfo | null>(null)
+  const [building, setBuilding] = useState(false)
+  const [buildResult, setBuildResult] = useState<BuildResult | null>(null)
+  const [pendingCommand, setPendingCommand] = useState<string | null>(null)
+  const [reloadKey, setReloadKey] = useState(0)
+  const [viewMode, setViewMode] = useState<'slides' | 'output'>('slides')
+
+  useEffect(() => {
+    setBuildResult(null)
+    setPendingCommand(null)
+    setViewMode('slides')
+    if (!selected) {
+      setBuildInfo(null)
+      return
+    }
+    let alive = true
+    client
+      .buildInfo(selected.path)
+      .then((i) => alive && setBuildInfo(i))
+      .catch((e) => {
+        console.warn('[html-studio] build/info failed', e)
+        alive && setBuildInfo(null)
+      })
+    return () => {
+      alive = false
+    }
+  }, [client, selected?.path]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const runBuild = useCallback(
+    async (trust = false) => {
+      if (!selected) return
+      setBuilding(true)
+      setPendingCommand(null)
+      try {
+        const res = await client.build(selected.path, trust)
+        if (res.needsTrust && res.command) {
+          setPendingCommand(res.command)
+          return
+        }
+        setBuildResult(res)
+        setReloadKey((k) => k + 1)
+        const info = await client.buildInfo(selected.path)
+        setBuildInfo(info)
+        if (res.ok && res.output) setViewMode('output')
+      } catch (e) {
+        setBuildResult({ ok: false, mode: 'external', stderr: e instanceof ApiError ? e.code : 'request_failed' })
+      } finally {
+        setBuilding(false)
+      }
+    },
+    [client, selected],
+  )
+
+  const openIssue = (file: string) => {
+    if (!preview) return
+    const idx = preview.slides.indexOf(file)
+    if (idx >= 0) {
+      setViewMode('slides')
+      setCurrent(idx)
+    }
+  }
+
+  const canBuild = !!selected && !!preview && preview.slides.length > 0 && !building && (buildInfo?.buildable ?? false)
+  const buildHint = !selected
+    ? ''
+    : !buildInfo
+      ? t('build.hint.loading')
+      : !buildInfo.buildable
+        ? t('build.hint.single_file')
+        : buildInfo.builtin
+          ? t('build.mode.builtin')
+          : buildInfo.command ?? '' 
+  const outputUrl = preview && buildInfo?.outputExists ? `${preview.baseUrl}/${buildInfo.output}` : null
+
   const refresh = useCallback(async () => {
     setLoading(true)
     setError(null)
@@ -76,19 +152,41 @@ export default function HtmlStudio() {
     }
   }, [client])
 
+  // Connect to the backend. Right after the app is (re)enabled the backend is
+  // still starting, so the first /status can fail: keep retrying until it
+  // answers, and only then load the deck list. Nothing renders half-loaded.
   useEffect(() => {
     let alive = true
-    client
-      .status()
-      .then((res) => {
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let attempt = 0
+    const connect = async () => {
+      if (!alive) return
+      try {
+        const res = await client.status()
         if (!alive) return
         setStatus(res)
         setConn('connected')
-        void refresh()
-      })
-      .catch(() => alive && setConn('error'))
+        await refresh()
+      } catch {
+        if (!alive) return
+        setConn(attempt === 0 ? 'connecting' : 'error')
+        attempt += 1
+        timer = setTimeout(connect, Math.min(1000 * attempt, 5000))
+      }
+    }
+    void connect()
+    const onFocus = () => {
+      if (timer) {
+        clearTimeout(timer)
+        timer = null
+        void connect()
+      }
+    }
+    window.addEventListener('focus', onFocus)
     return () => {
       alive = false
+      if (timer) clearTimeout(timer)
+      window.removeEventListener('focus', onFocus)
     }
   }, [client, refresh])
 
@@ -175,6 +273,7 @@ export default function HtmlStudio() {
           <StatusDot conn={conn} />
           {statusText}
           {status ? ` · ${t('footer.version')} ${status.version}` : ''}
+          {` · ui ${__HS_BUILD__}`}
         </span>
         <div className="ml-auto inline-flex items-center gap-1" role="group" aria-label={t('lang.label')}>
           <span className="text-muted mr-1">{t('lang.label')}</span>
@@ -235,7 +334,8 @@ export default function HtmlStudio() {
                   selectedId={selectedId}
                   loading={loading}
                   error={error}
-                  pickerSupported={status?.pickerSupported ?? false}
+                  pickerSupported={status?.pickerSupported ?? /Mac/i.test(navigator.platform)}
+                  connected={conn === 'connected'}
                   onSelect={selectDeck}
                   onAddRoot={addRoot}
                   onRemoveRoot={removeRoot}
@@ -254,7 +354,7 @@ export default function HtmlStudio() {
               {selected ? (
                 preview ? (
                   preview.slides.length ? (
-                    <SlideStrip preview={preview} current={current} onSelect={setCurrent} />
+                    <SlideStrip preview={preview} current={current} onSelect={setCurrent} reloadKey={reloadKey} />
                   ) : (
                     <p className="m-0 text-[12px] text-muted">{t('deck.summary.no_slides')}</p>
                   )
@@ -288,16 +388,77 @@ export default function HtmlStudio() {
           <div className="hs-fill hs-scroll min-h-0 flex flex-col">
           <div className="flex items-center justify-between gap-2 mb-2 flex-wrap flex-none">
             <CardTitle>{selected ? selected.name : t('panel.preview')}</CardTitle>
-            <div className="flex gap-1 flex-wrap">
-              {(['toolbar.build', 'toolbar.check', 'toolbar.present', 'toolbar.pdf'] as const).map((k) => (
+            <div className="flex gap-1 flex-wrap items-center">
+              {outputUrl && (
+                <div className="inline-flex rounded-md border border-border overflow-hidden mr-2" role="group" aria-label={t('view.label')}>
+                  {(['slides', 'output'] as const).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setViewMode(m)}
+                      aria-pressed={viewMode === m}
+                      className="px-2 py-0.5 text-[12px] cursor-pointer border-0"
+                      style={{
+                        background: viewMode === m ? 'var(--bg-hover)' : 'transparent',
+                        color: viewMode === m ? 'var(--accent)' : 'var(--muted)',
+                        fontWeight: viewMode === m ? 600 : 400,
+                      }}
+                    >
+                      {t(`view.${m}`)}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <SmallBtn
+                active
+                onClick={() => runBuild(false)}
+                disabled={!canBuild}
+                className="inline-flex items-center gap-1.5"
+                title={buildHint}
+              >
+                {building && <Spinner />}
+                {t('toolbar.build')}
+              </SmallBtn>
+              {(['toolbar.check', 'toolbar.present', 'toolbar.pdf'] as const).map((k) => (
                 <SmallBtn key={k} disabled>
                   {t(k)}
                 </SmallBtn>
               ))}
             </div>
           </div>
+          {selected && (buildResult || pendingCommand) && (
+            <div className="mb-2 flex-none">
+              <BuildPanel
+                t={t}
+                result={buildResult}
+                pendingCommand={pendingCommand}
+                onTrust={() => runBuild(true)}
+                onCancelTrust={() => setPendingCommand(null)}
+                onOpenIssue={openIssue}
+                onDismiss={() => setBuildResult(null)}
+              />
+            </div>
+          )}
           {selected && preview ? (
-            <SlideViewer t={t} preview={preview} current={current} onChange={setCurrent} />
+            viewMode === 'output' && outputUrl ? (
+              <div className="flex flex-col gap-2 min-h-0">
+                <div className="text-[12px] text-muted">{t('view.output_hint')}</div>
+                <div
+                  className="w-full rounded-md border border-border overflow-hidden"
+                  style={{ aspectRatio: '16 / 9', background: '#111' }}
+                >
+                  <iframe
+                    key={reloadKey}
+                    src={outputUrl}
+                    title={buildInfo?.output ?? 'output'}
+                    sandbox="allow-scripts allow-same-origin"
+                    className="w-full h-full border-0"
+                  />
+                </div>
+              </div>
+            ) : (
+              <SlideViewer t={t} preview={preview} current={current} onChange={setCurrent} reloadKey={reloadKey} />
+            )
           ) : (
             <div
               className="w-full rounded-md border border-border flex items-center justify-center"

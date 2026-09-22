@@ -107,9 +107,64 @@ class ServerTests(unittest.TestCase):
         a = reg.ensure(self.deck, "slides", None)
         b = reg.ensure(self.deck, "slides", None)
         self.assertIs(a, b)
+        c = reg.ensure(self.deck, "slides", None, extra_files=("index.html",))
+        self.assertIsNot(a, c)  # allow-list changed -> restarted
         self.assertTrue(reg.stop(self.deck))
         self.assertFalse(reg.stop(self.deck))
         reg.stop_all()
+
+    def test_extra_file_allowlist(self) -> None:
+        (self.deck / "index.html").write_text("<html>built</html>")
+        (self.deck / "studio.json").write_text("{}")
+        p = preview.DeckPreview(self.deck, "slides", None, extra_files=("index.html",))
+        port = p.start()
+        try:
+            base = f"http://127.0.0.1:{port}"
+            self.assertEqual(get(f"{base}/index.html")[0], 200)
+            self.assertEqual(get(f"{base}/studio.json")[0], 404)  # not allow-listed
+        finally:
+            p.stop()
+
+
+class SingleFileTests(unittest.TestCase):
+    DOC = (
+        "<!doctype html><html><head><title>T</title><meta charset='utf-8'>"
+        "<link rel=\"stylesheet\" href=\"assets/deck.css\"><style>.x{color:red}</style></head><body>"
+        "<svg xmlns='http://www.w3.org/2000/svg' style='display:none'><symbol id='i-a'></symbol></svg>"
+        "<div class='progress-bar'></div>"
+        "<section class=\"slide cover active\"><h1>One</h1></section>"
+        "<section class='slide'><h2>Two</h2><use href='#i-a'/><div class='slide-foot'></div></section>"
+        "<section class='not-a-slide'>ignored</section>"
+        "</body></html>"
+    )
+
+    def test_split_sections(self) -> None:
+        secs = preview.split_sections(self.DOC)
+        self.assertEqual(len(secs), 2)
+        self.assertIn("<h1>One</h1>", secs[0])
+        self.assertIn("<h2>Two</h2>", secs[1])
+
+    def test_inherited_chrome(self) -> None:
+        head, hidden = preview.inherited_chrome(self.DOC)
+        self.assertIn('href="assets/deck.css"', head)
+        self.assertIn(".x{color:red}", head)
+        self.assertNotIn("<title>", head)
+        self.assertIn("<symbol id='i-a'>", hidden)
+
+    def test_render_single_file_slide(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            deck = Path(tmp)
+            (deck / "index.html").write_text(self.DOC)
+            p = preview.DeckPreview(deck, "slides", None, entry="index.html")
+            self.assertEqual(p.slide_count(), 2)
+            page = p.render_slide(1)
+            assert page is not None
+            self.assertIn("<h2>Two</h2>", page)
+            self.assertIn("<symbol id='i-a'>", page)          # icon library carried over
+            self.assertIn('href="assets/deck.css"', page)     # deck's own stylesheet
+            self.assertNotIn("--hs-accent", page)             # no default theme injected
+            self.assertIn('class="pageno">2<', page)
+            self.assertIsNone(p.render_slide(2))
 
 
 if __name__ == "__main__":

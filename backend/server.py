@@ -29,11 +29,12 @@ from urllib.parse import urlsplit
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import decks as deck_lib  # noqa: E402
 import preview as preview_lib  # noqa: E402
+import build as build_lib  # noqa: E402
 
 PREVIEWS = preview_lib.PreviewRegistry()
 
 APP_NAME = os.environ.get("KIROCREW_APP_NAME", "html-studio")
-APP_VERSION = "0.1.0"
+APP_VERSION = "0.1.1"
 PORT = int(os.environ.get("PORT", "9100"))
 HOME = Path(os.environ.get("KIROCREW_HOME", str(Path.home() / ".kiro" / "crew")))
 DATA_DIR = HOME / "apps" / APP_NAME / "data"
@@ -41,8 +42,8 @@ DATA_DIR = HOME / "apps" / APP_NAME / "data"
 _PROXY_HEADER = "X-KiroCrew-Proxy"
 _MAX_SKEW_SECONDS = 60
 _PICK_FOLDER_TIMEOUT = 120
-# No leading "activate": it costs ~2s before the dialog appears and
-# "choose folder" already brings its own modal dialog to the front.
+# The chooser must be hosted by a foreground process or it opens BEHIND the
+# app window. Self-"activate" costs ~2s; activating System Events costs ~0.3s.
 _PICK_FOLDER_PROMPT = "Choose a folder that contains slide decks"
 
 
@@ -50,14 +51,21 @@ def _pick_folder_script(start_dir: str | None) -> str:
     where = f' default location (POSIX file "{start_dir}")' if start_dir else ""
     return "\n".join(
         [
-            "try",
-            f'  set chosen to choose folder with prompt "{_PICK_FOLDER_PROMPT}"{where}',
-            "  return POSIX path of chosen",
-            "on error number -128",
-            '  return ""',
-            "end try",
+            'tell application "System Events"',
+            "  activate",
+            "  try",
+            f'    set chosen to choose folder with prompt "{_PICK_FOLDER_PROMPT}"{where}',
+            "    return POSIX path of chosen",
+            "  on error number -128",
+            '    return ""',
+            "  end try",
+            "end tell",
         ]
     )
+
+
+def _log(msg: str) -> None:
+    print(f"[{time.strftime('%H:%M:%S')}] {msg}", file=sys.stderr, flush=True)
 
 
 # --------------------------------------------------------------------------- auth
@@ -87,7 +95,7 @@ Route = Callable[["Handler", dict[str, Any]], tuple[int, Any]]
 
 
 def route_health(_h: "Handler", _body: dict[str, Any]) -> tuple[int, Any]:
-    return 200, {"status": "ok", "app": APP_NAME}
+    return 200, {"status": "ok", "app": APP_NAME, "version": APP_VERSION, "routes": len(ROUTES)}
 
 
 def route_status(_h: "Handler", _body: dict[str, Any]) -> tuple[int, Any]:
@@ -202,12 +210,16 @@ def route_preview_start(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
     if info is None:
         return 404, {"error": "not_a_deck"}
     css = _deck_css(deck)
-    p = PREVIEWS.ensure(deck, info["slidesDir"], css)
+    entry = info.get("entry")
+    output = build_lib.build_contract(deck, entry)["output"]
+    p = PREVIEWS.ensure(deck, info["slidesDir"], css, extra_files=(output,), entry=entry)
     return 200, {
         "port": p.port,
         "baseUrl": f"http://127.0.0.1:{p.port}",
         "slides": info["slides"],
+        "kind": info["kind"],
         "css": css,
+        "output": output,
         "stage": {"width": preview_lib.STAGE_W, "height": preview_lib.STAGE_H},
     }
 
@@ -216,6 +228,37 @@ def route_preview_stop(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
     raw = str(body.get("path", ""))
     stopped = PREVIEWS.stop(Path(raw)) if raw else False
     return 200, {"stopped": stopped}
+
+
+def route_build_info(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
+    deck = _deck_under_roots(str(body.get("path", "")))
+    if deck is None:
+        return 400, {"error": "deck_not_allowed"}
+    deck_info = deck_lib.describe_deck(deck, deck)
+    info = build_lib.build_contract(deck, deck_info.get("entry") if deck_info else None)
+    info["trusted"] = bool(info["command"]) and build_lib.is_trusted(DATA_DIR, deck, info["command"])
+    return 200, info
+
+
+def route_build(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
+    """Run the deck build. ``{"trust": true}`` records consent for the declared command."""
+    deck = _deck_under_roots(str(body.get("path", "")))
+    if deck is None:
+        return 400, {"error": "deck_not_allowed"}
+    info = deck_lib.describe_deck(deck, deck)
+    if info is None:
+        return 404, {"error": "not_a_deck"}
+    try:
+        result = build_lib.build(
+            DATA_DIR, deck, info["slidesDir"], trust_command=bool(body.get("trust")), entry=info.get("entry")
+        )
+    except build_lib.BuildError as exc:
+        if exc.code == "not_buildable":
+            return 200, {"ok": False, "error": exc.code, "stderr": str(exc)}
+        # Consent is a normal outcome, not a transport error: answer 200 so the
+        # UI gets the command text regardless of how the SDK surfaces non-2xx.
+        return 200, {"ok": False, "needsTrust": True, "error": exc.code, "command": str(exc)}
+    return 200, result
 
 
 ROUTES: dict[tuple[str, str], Route] = {
@@ -227,6 +270,8 @@ ROUTES: dict[tuple[str, str], Route] = {
     ("GET", "/decks"): route_decks,
     ("POST", "/preview/start"): route_preview_start,
     ("POST", "/preview/stop"): route_preview_stop,
+    ("POST", "/build/info"): route_build_info,
+    ("POST", "/build"): route_build,
 }
 
 # Routes reachable without the gateway signature (gateway health probe only).
@@ -264,11 +309,13 @@ class Handler(BaseHTTPRequestHandler):
         if key not in UNAUTHENTICATED and not verify_proxy_signature(
             self.headers.get(_PROXY_HEADER, ""), method=method, target=self.path, body=body
         ):
+            _log(f"401 {method} {self.path} (proxy signature missing or invalid)")
             self._json(401, {"error": "invalid_proxy_signature"})
             return
 
         handler = ROUTES.get(key)
         if handler is None:
+            _log(f"404 {method} {self.path}")
             self._json(404, {"error": "not_found", "path": key[1]})
             return
 

@@ -32,3 +32,5 @@ declare module '@kirocrew/app-sdk/ui' {
 }
 
 declare module 'lucide-react'
+
+declare const __HS_BUILD__: string
