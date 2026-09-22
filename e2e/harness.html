@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>html-studio E2E harness</title>
+<!--
+  Stands in for the Kiro Crew dashboard around the app:
+  * import map routes the bundle's bare imports to the shim modules
+  * the same CSS variables and colour tokens the dashboard exposes
+  * Tailwind (Play CDN) configured with those tokens, so host classes like
+    text-muted / border-border / bg-ok resolve. check-classes.mjs separately
+    guarantees the bundle only uses classes the real host ships.
+-->
+<script type="importmap">
+{
+  "imports": {
+    "react": "/shim/react.mjs",
+    "react-dom": "/shim/react-dom.mjs",
+    "react-dom/client": "/shim/react-dom-client.mjs",
+    "react/jsx-runtime": "/shim/jsx-runtime.mjs",
+    "@kirocrew/app-sdk": "/shim/app-sdk.mjs",
+    "@kirocrew/app-sdk/ui": "/shim/app-sdk-ui.mjs",
+    "lucide-react": "/shim/lucide-react.mjs"
+  }
+}
+</script>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          accent: 'var(--accent)', muted: 'var(--muted)', border: 'var(--border)', 'border-strong': 'var(--border-strong)',
+          card: 'var(--card)', bg: 'var(--bg)', 'bg-elevated': 'var(--bg-elevated)', 'bg-hover': 'var(--bg-hover)',
+          text: 'var(--text)', 'text-strong': 'var(--text-strong)', ok: 'var(--ok)', warn: 'var(--warn)', danger: 'var(--danger)',
+        },
+      },
+    },
+  }
+</script>
+<style>
+  :root {
+    --accent:#6d5efc; --muted:#6b7280; --border:#e5e7eb; --border-strong:#cbd5e1; --card:#ffffff; --bg:#f8fafc;
+    --bg-elevated:#ffffff; --bg-hover:#f1f5f9; --text:#1f2430; --text-strong:#0f172a; --ok:#22c55e; --warn:#eab308; --danger:#ef4444;
+  }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  /* The dashboard's main column: the app is NOT given a bounded height here either. */
+  #root { min-height:100%; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="module">
+  import React from 'react'
+  import { createRoot } from 'react-dom/client'
+  const mod = await import('/ui/index.mjs')
+  const App = mod.default
+  createRoot(document.getElementById('root')).render(React.createElement(App))
+  window.__hsReady = true
+</script>
+</body>
+</html>

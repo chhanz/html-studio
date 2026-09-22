@@ -22,6 +22,19 @@ kirocrew app enable html-studio
 
 The dashboard provides `react`, `lucide-react` and `@kirocrew/app-sdk` at runtime; they are marked external in `ui/vite.config.ts`.
 
+## Verification
+
+```bash
+./verify.sh quick   # backend tests, typecheck, build, host-class lint
+./verify.sh         # ...plus the end-to-end harness (headless Chromium)
+```
+
+`e2e/` runs the built UI bundle against the real backend inside a harness that
+stands in for the dashboard (SDK shim + signed proxy), using the fictional
+sample decks in `e2e/fixtures/`. `e2e/check-classes.mjs` fails the build when
+the UI uses a Tailwind class the dashboard's precompiled stylesheet does not
+ship. First run: `cd e2e && npm install && npx playwright install chromium`.
+
 ## License
 
 MIT

@@ -1,0 +1,18 @@
+{
+  "name": "html-studio-e2e",
+  "private": true,
+  "type": "module",
+  "description": "End-to-end harness: real backend + built UI bundle in headless Chromium, with a shim standing in for the Kiro Crew dashboard SDK.",
+  "scripts": {
+    "shim": "vite build --config shim/vite.config.mjs",
+    "pretest": "npm run shim && node check-classes.mjs",
+    "test": "playwright test",
+    "test:headed": "playwright test --headed"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.47.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "vite": "^5.0.0"
+  }
+}
