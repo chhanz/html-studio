@@ -7,9 +7,9 @@
   Stands in for the Kiro Crew dashboard around the app:
   * import map routes the bundle's bare imports to the shim modules
   * the same CSS variables and colour tokens the dashboard exposes
-  * Tailwind (Play CDN) configured with those tokens, so host classes like
-    text-muted / border-border / bg-ok resolve. check-classes.mjs separately
-    guarantees the bundle only uses classes the real host ships.
+  * a Tailwind sheet precompiled from the bundle with those tokens, so host
+    classes like text-muted / border-border / bg-ok resolve. check-classes.mjs
+    separately guarantees the bundle only uses classes the real host ships.
 -->
 <script type="importmap">
 {
@@ -24,20 +24,8 @@
   }
 }
 </script>
-<script src="https://cdn.tailwindcss.com"></script>
-<script>
-  tailwind.config = {
-    theme: {
-      extend: {
-        colors: {
-          accent: 'var(--accent)', muted: 'var(--muted)', border: 'var(--border)', 'border-strong': 'var(--border-strong)',
-          card: 'var(--card)', bg: 'var(--bg)', 'bg-elevated': 'var(--bg-elevated)', 'bg-hover': 'var(--bg-hover)',
-          text: 'var(--text)', 'text-strong': 'var(--text-strong)', ok: 'var(--ok)', warn: 'var(--warn)', danger: 'var(--danger)',
-        },
-      },
-    },
-  }
-</script>
+<!-- Precompiled by `npm run shim` (tailwind.config.mjs): fully offline, no CDN. -->
+<link rel="stylesheet" href="/shim/harness.css">
 <style>
   :root {
     --accent:#6d5efc; --muted:#6b7280; --border:#e5e7eb; --border-strong:#cbd5e1; --card:#ffffff; --bg:#f8fafc;
