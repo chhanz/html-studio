@@ -1,0 +1,50 @@
+# --- KiroCrew app runtime state (never ship) ---
+data/
+.app_secret
+installed.json
+
+# --- UI build ---
+ui/node_modules/
+ui/dist/
+ui/.vite/
+*.tsbuildinfo
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Node (any nested package) ---
+node_modules/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- Local-only files (user adapters, scratch, secrets) ---
+*.local.*
+*.local
+.env
+.env.*
+!.env.example
+local/
+scratch/
+tmp/
+
+# --- Deck build output produced while testing the sample deck ---
+examples/**/out/
+examples/**/tokens.css
+examples/**/notes/
+
+# --- Editors / OS ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
+*.bak
+*.bak-*
