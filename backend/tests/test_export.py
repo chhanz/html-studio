@@ -74,5 +74,26 @@ class RenderTests(unittest.TestCase):
                 p.stop()
 
 
+@unittest.skipIf(BROWSER is None, "no headless Chromium available")
+class BuiltinOutputPrintTests(unittest.TestCase):
+    def test_builtin_output_prints_one_page_per_slide_without_chrome(self) -> None:
+        import build  # noqa: WPS433
+        with tempfile.TemporaryDirectory() as tmp:
+            deck = Path(tmp) / "deck"
+            (deck / "slides").mkdir(parents=True)
+            for i in range(3):
+                (deck / "slides" / f"{(i + 1) * 10:03d}.html").write_text(f"<section class='slide'><h1>S{i}</h1></section>")
+            r = build.run_builtin(deck, "slides", "out/index.html")
+            self.assertTrue(r["ok"], r)
+            p = preview.DeckPreview(deck, "slides", None, extra_files=("out/index.html",))
+            port = p.start()
+            try:
+                out = deck / "deck.pdf"
+                export.render_pdf(BROWSER, f"http://127.0.0.1:{port}/out/index.html", out, timeout=60)
+                self.assertEqual(pdf_pages(out.read_bytes()), 3)
+            finally:
+                p.stop()
+
+
 if __name__ == "__main__":
     unittest.main()

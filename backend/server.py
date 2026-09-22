@@ -39,7 +39,7 @@ PDF_JOBS = export_lib.ExportJobs()
 PREVIEWS = preview_lib.PreviewRegistry()
 
 APP_NAME = os.environ.get("KIROCREW_APP_NAME", "html-studio")
-APP_VERSION = "0.1.4"
+APP_VERSION = "0.1.5"
 PORT = int(os.environ.get("PORT", "9100"))
 HOME = Path(os.environ.get("KIROCREW_HOME", str(Path.home() / ".kiro" / "crew")))
 DATA_DIR = HOME / "apps" / APP_NAME / "data"

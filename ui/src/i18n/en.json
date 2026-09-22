@@ -72,7 +72,7 @@
   "error.picker_busy": "A folder chooser is already open.",
   "error.path_required": "Enter a path.",
   "error.unknown_route": "The running backend is older than the app UI. Turn the app off and on in the App Store to restart it.",
-  "present.hint": "Open the built deck full-screen from the current slide",
+  "present.hint": "Present full-screen from the current slide",
   "present.need_output": "Build the deck first",
   "pdf.hint": "Export the built deck to PDF",
   "pdf.done": "PDF saved ({kb} KB)",
@@ -81,5 +81,12 @@
   "error.no_browser": "No headless Chromium found. Install Google Chrome, or set HTML_STUDIO_CHROME to a Chromium binary.",
   "error.pdf_timeout": "PDF rendering timed out.",
   "error.pdf_failed": "PDF rendering failed.",
-  "error.open_failed": "Could not open the system browser."
+  "error.open_failed": "Could not open the system browser.",
+  "present.title": "Presentation",
+  "present.keys": "← → navigate · F fullscreen · Esc exit",
+  "present.fullscreen": "Fullscreen",
+  "present.exit_fullscreen": "Exit fullscreen",
+  "present.close": "Exit",
+  "present.browser": "Open in browser",
+  "present.browser_hint": "Open the built deck in your default browser (for a second screen)"
 }

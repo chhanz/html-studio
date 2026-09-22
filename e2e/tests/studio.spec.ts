@@ -152,11 +152,10 @@ test('single-file deck: previews sections, build is disabled with a hint', async
   await expect(page.getByRole('group', { name: /^View$/ })).toBeVisible()
 })
 
-test('present opens the built deck in a popup at the current slide', async ({ page, context }) => {
+test('present opens an in-app presenter at the current slide', async ({ page }) => {
   await openApp(page)
   await addFixtureRoot(page)
   await selectDeck(page, 'acme-quarterly')
-  const present = page.getByRole('button', { name: /^Present$/ })
   await page.getByRole('button', { name: /^Build$/ }).click()
   await expect(page.getByRole('status').filter({ hasText: /Build succeeded/ })).toBeVisible()
   await page.getByRole('group', { name: /^View$/ }).getByRole('button', { name: /^Slides$/ }).click()
@@ -164,14 +163,20 @@ test('present opens the built deck in a popup at the current slide', async ({ pa
   await page.keyboard.press('ArrowRight')
   await expect(page.getByText('3 / 4')).toBeVisible()
 
-  const popupPromise = context.waitForEvent('page')
-  await present.click()
-  const popup = await popupPromise
-  await popup.waitForLoadState()
-  expect(popup.url()).toMatch(/\/out\/index\.html#3$/)
-  await expect(popup.locator('.slide.active')).toContainText('Uptime')
-  await expect(popup.locator('#hs-counter')).toHaveText('3 / 4')
-  await popup.close()
+  await page.getByRole('button', { name: /^Present$/ }).click()
+  const dialog = page.getByRole('dialog', { name: /Presentation/ })
+  await expect(dialog).toBeVisible()
+  const frame = page.frameLocator('iframe[title="Presentation"]')
+  await expect(frame.locator('.slide.active')).toContainText('Uptime')
+  await expect(frame.locator('#hs-counter')).toHaveText('3 / 4')
+
+  await page.keyboard.press('ArrowRight')
+  await expect(frame.locator('#hs-counter')).toHaveText('4 / 4')
+  await page.mouse.move(400, 300) // control bar auto-hides; a pointer move reveals it
+  await expect(dialog.getByText('4 / 4')).toBeVisible()
+
+  await page.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
 })
 
 test('exports the built deck to PDF', async ({ page }) => {

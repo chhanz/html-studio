@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ApiError, type BackendStatus, type BuildInfo, type BuildResult, type Deck, type PdfJob, type PreviewInfo, makeClient } from './api'
 import { BuildPanel } from './components/BuildPanel'
 import { DeckPanel } from './components/DeckPanel'
+import { Presenter } from './components/Presenter'
 import { Section, useCollapsed } from './components/Section'
 import { SlideStrip } from './components/SlideStrip'
 import { SlideViewer } from './components/SlideViewer'
@@ -137,17 +138,15 @@ export default function HtmlStudio() {
     setPdfError(null)
   }, [selected?.path])
 
+  const [presenting, setPresenting] = useState(false)
   const present = useCallback(() => {
     if (!selected || !outputUrl) return
-    // Slide numbers are 1-based in deck runtimes; only meaningful for slides decks
-    // whose output preserves the order (true for both assemblers).
-    const url = `${outputUrl}#${current + 1}`
-    // Prefer a real popup so the deck runs full-screen in its own window; the
-    // dashboard (Electron) may deny window.open, in which case fall back to the
-    // system browser via the backend.
-    const win = window.open(url, 'html-studio-present', 'popup=yes,width=1280,height=720')
-    if (!win) void client.present(selected.path, current + 1).catch((e) => setPdfError(e instanceof ApiError ? e.code : 'request_failed'))
-  }, [client, selected, outputUrl, current])
+    setPresenting(true)
+  }, [selected, outputUrl])
+  const presentInBrowser = useCallback(() => {
+    if (!selected) return
+    void client.present(selected.path, current + 1).catch((e) => setPdfError(e instanceof ApiError ? e.code : 'request_failed'))
+  }, [client, selected, current])
 
   const exportPdf = useCallback(async () => {
     if (!selected) return
@@ -479,6 +478,9 @@ export default function HtmlStudio() {
               <SmallBtn onClick={present} disabled={!outputUrl} title={outputUrl ? t('present.hint') : t('present.need_output')}>
                 {t('toolbar.present')}
               </SmallBtn>
+              <SmallBtn onClick={presentInBrowser} disabled={!outputUrl} title={t('present.browser_hint')} aria-label={t('present.browser')}>
+                ↗
+              </SmallBtn>
               <SmallBtn
                 onClick={() => void exportPdf()}
                 disabled={!outputUrl || pdf?.state === 'running'}
@@ -578,6 +580,15 @@ export default function HtmlStudio() {
         </Card>
         </div>
       </div>
+      {presenting && selected && outputUrl && preview && (
+        <Presenter
+          t={t}
+          url={outputUrl}
+          startSlide={current + 1}
+          slideCount={preview.slides.length}
+          onClose={() => setPresenting(false)}
+        />
+      )}
     </div>
   )
 }

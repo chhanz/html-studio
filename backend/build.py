@@ -146,10 +146,14 @@ def run_external(deck: Path, command: str, output: str) -> dict[str, Any]:
 _RUNTIME_JS = """
 (function(){var s=[].slice.call(document.querySelectorAll('.slide')),i=0;
 function show(n){i=Math.max(0,Math.min(s.length-1,n));s.forEach(function(e,k){e.classList.toggle('active',k===i)});
-var c=document.getElementById('hs-counter');if(c)c.textContent=(i+1)+' / '+s.length;history.replaceState(null,'',location.pathname+location.search+'#'+(i+1));}
+var c=document.getElementById('hs-counter');if(c)c.textContent=(i+1)+' / '+s.length;history.replaceState(null,'',location.pathname+location.search+'#'+(i+1));if(parent!==window)parent.postMessage({type:'hs-slide',index:i,total:s.length},'*');}
 function fit(){var st=document.querySelector('.hs-stage');if(!st)return;var k=Math.min(innerWidth/1280,innerHeight/720);st.style.transform='scale('+k+')';}
+function full(){var d=document.documentElement;if(document.fullscreenElement)document.exitFullscreen&&document.exitFullscreen();else if(d.requestFullscreen)d.requestFullscreen().catch(function(){});}
 addEventListener('keydown',function(e){if(e.key==='ArrowRight'||e.key==='PageDown'||e.key===' ')show(i+1);
-else if(e.key==='ArrowLeft'||e.key==='PageUp')show(i-1);else if(e.key==='Home')show(0);else if(e.key==='End')show(s.length-1);});
+else if(e.key==='ArrowLeft'||e.key==='PageUp')show(i-1);else if(e.key==='Home')show(0);else if(e.key==='End')show(s.length-1);
+else if(e.key==='f'||e.key==='F')full();else if(e.key==='p'||e.key==='P')print();else if(e.key==='Escape'&&parent!==window)parent.postMessage({type:'hs-exit'},'*');});
+addEventListener('message',function(e){var m=e.data||{};if(m.type==='hs-go')show((m.index|0));else if(m.type==='hs-step')show(i+(m.delta|0));else if(m.type==='hs-fullscreen')full();});
+addEventListener('hashchange',function(){var h=parseInt(location.hash.slice(1),10);if(!isNaN(h))show(h-1);});
 addEventListener('resize',fit);var h=parseInt(location.hash.slice(1),10);show(isNaN(h)?0:h-1);fit();})();
 """
 
@@ -206,8 +210,18 @@ def run_builtin(deck: Path, slides_dir: str, output: str, css_rel: str | None = 
         f"<style>{css}\nhtml,body{{height:100%;background:#111;overflow:hidden}}"
         ".hs-stage{position:absolute;left:50%;top:50%;width:1280px;height:720px;margin:-360px 0 0 -640px;transform-origin:center center;background:#fff}"
         ".hs-stage>.slide{display:none;position:absolute;inset:0}.hs-stage>.slide.active{display:flex;animation:none}"
-        "#hs-counter{position:fixed;right:12px;bottom:8px;color:#888;font:12px monospace}</style></head>"
-        f'<body><div class="hs-stage">{body}</div><div id="hs-counter"></div>'
+        "#hs-counter{position:fixed;right:12px;bottom:8px;color:#888;font:12px monospace}"
+        # Print: undo the screen layout so every slide is one full page and the
+        # runtime chrome (dark backdrop, counter) never reaches the PDF.
+        "@media print{@page{size:1280px 720px;margin:0}"
+        "html,body{width:1280px;height:auto!important;overflow:visible!important;background:#fff!important}"
+        ".hs-stage{position:static!important;margin:0!important;transform:none!important;width:1280px;height:auto!important;background:transparent}"
+        ".hs-stage>.slide{display:flex!important;position:relative!important;inset:auto!important;width:1280px;height:720px;"
+        "break-after:page;page-break-after:always;break-inside:avoid;animation:none!important}"
+        ".hs-stage>.slide:last-child{break-after:auto;page-break-after:auto}"
+        "#hs-counter{display:none!important}}</style></head>"
+        # `.stage` alias: deck stylesheets commonly scope their own print rules to it.
+        f'<body><div class="hs-stage stage">{body}</div><div id="hs-counter"></div>'
         f"<script>{_RUNTIME_JS}</script></body></html>"
     )
     target.parent.mkdir(parents=True, exist_ok=True)
