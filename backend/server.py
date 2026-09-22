@@ -302,7 +302,8 @@ def route_build(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
         return 404, {"error": "not_a_deck"}
     try:
         result = build_lib.build(
-            DATA_DIR, deck, info["slidesDir"], trust_command=bool(body.get("trust")), entry=info.get("entry")
+            DATA_DIR, deck, info["slidesDir"], trust_command=bool(body.get("trust")),
+            entry=info.get("entry"), css_rel=_deck_css(deck),
         )
     except build_lib.BuildError as exc:
         if exc.code == "not_buildable":

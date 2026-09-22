@@ -86,6 +86,17 @@ class RunTests(unittest.TestCase):
         self.assertNotIn("cover active", page)  # runtime owns .active
         self.assertIn("hs-counter", page)
 
+    def test_builtin_uses_deck_stylesheet_when_present(self) -> None:
+        deck = make_deck(self.root / "d", ["<section class='slide'><img src='img/a.png'></section>"])
+        (deck / "assets").mkdir()
+        (deck / "assets" / "deck.css").write_text(".slide{color:red}")
+        r = build.build(self.data, deck, "slides", css_rel="assets/deck.css")
+        self.assertTrue(r["ok"], r)
+        page = (deck / "out" / "index.html").read_text()
+        self.assertIn('<link rel="stylesheet" href="assets/deck.css">', page)
+        self.assertIn('<base href="../">', page)   # output is one folder deep
+        self.assertNotIn("--hs-accent", page)      # no default theme on top
+
     def test_builtin_reports_validation_issue(self) -> None:
         deck = make_deck(self.root / "d", ["<section class='slide'>a</section><section>b</section>"])
         r = build.build(self.data, deck, "slides")

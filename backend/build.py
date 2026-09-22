@@ -165,8 +165,13 @@ def _strip_active(fragment: str) -> str:
     return _CLASS_RE.sub(repl, fragment)
 
 
-def run_builtin(deck: Path, slides_dir: str, output: str) -> dict[str, Any]:
-    """Assemble slides into one page with the default theme and a tiny runtime."""
+def run_builtin(deck: Path, slides_dir: str, output: str, css_rel: str | None = None) -> dict[str, Any]:
+    """Assemble slides into one page with the deck's stylesheet (or the default theme) and a tiny runtime.
+
+    ``css_rel`` is a deck-relative stylesheet (e.g. ``assets/deck.css``). The
+    output lives in a subfolder, so a ``<base>`` pointing at the deck root keeps
+    the slides' relative ``img/...`` references and the stylesheet's ``url()``s working.
+    """
     started = time.monotonic()
     slides = sorted(p for p in (deck / slides_dir).glob("*.html") if p.is_file())
     if not slides:
@@ -184,19 +189,27 @@ def run_builtin(deck: Path, slides_dir: str, output: str) -> dict[str, Any]:
         return {"ok": False, "mode": "builtin", "exitCode": 1, "output": None,
                 "durationMs": int((time.monotonic() - started) * 1000), "issues": issues,
                 "stdout": "", "stderr": "slide validation failed"}
-    css = preview_lib.default_theme_css()
+    target = deck / output
+    depth = len(Path(output).parent.parts)
+    base_href = "../" * depth if depth else "./"
+    if css_rel and (deck / css_rel).is_file():
+        theme = f'<link rel="stylesheet" href="{html.escape(css_rel, quote=True)}">'
+        css = ""
+    else:
+        theme = ""
+        css = preview_lib.default_theme_css()
     body = "\n".join(parts)
     page = (
         '<!doctype html><html><head><meta charset="utf-8">'
-        f"<title>{html.escape(deck.name)}</title>"
+        f'<base href="{base_href}">'
+        f"<title>{html.escape(deck.name)}</title>{theme}"
         f"<style>{css}\nhtml,body{{height:100%;background:#111;overflow:hidden}}"
         ".hs-stage{position:absolute;left:50%;top:50%;width:1280px;height:720px;margin:-360px 0 0 -640px;transform-origin:center center;background:#fff}"
-        ".hs-stage>.slide{display:none;position:absolute;inset:0}.hs-stage>.slide.active{display:flex}"
+        ".hs-stage>.slide{display:none;position:absolute;inset:0}.hs-stage>.slide.active{display:flex;animation:none}"
         "#hs-counter{position:fixed;right:12px;bottom:8px;color:#888;font:12px monospace}</style></head>"
         f'<body><div class="hs-stage">{body}</div><div id="hs-counter"></div>'
         f"<script>{_RUNTIME_JS}</script></body></html>"
     )
-    target = deck / output
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(page, encoding="utf-8")
     return {"ok": True, "mode": "builtin", "exitCode": 0, "output": output,
@@ -204,14 +217,17 @@ def run_builtin(deck: Path, slides_dir: str, output: str) -> dict[str, Any]:
             "stdout": f"assembled {len(slides)} slides into {output}", "stderr": ""}
 
 
-def build(data_dir: Path, deck: Path, slides_dir: str, *, trust_command: bool = False, entry: str | None = None) -> dict[str, Any]:
+def build(
+    data_dir: Path, deck: Path, slides_dir: str, *, trust_command: bool = False,
+    entry: str | None = None, css_rel: str | None = None,
+) -> dict[str, Any]:
     """Run the deck's build. Raises BuildError('untrusted_command') when consent is needed."""
     contract = build_contract(deck, entry)
     command = contract["command"]
     if command is None:
         if not contract["buildable"]:
             raise BuildError("not_buildable", "single-file deck has nothing to assemble")
-        return run_builtin(deck, slides_dir, contract["output"])
+        return run_builtin(deck, slides_dir, contract["output"], css_rel)
     if trust_command:
         trust(data_dir, deck, command)
     elif not is_trusted(data_dir, deck, command):
