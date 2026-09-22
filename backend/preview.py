@@ -138,7 +138,10 @@ def _inject_pageno(fragment: str, n: int) -> str:
 # Helper injected into the built deck when it is shown inside the studio's
 # presenter (``?hs=present``). The presenter is a different origin, so it cannot
 # inspect the deck's DOM; instead it sends the click point and this script
-# answers with the image under it (or a miss). Nothing else is changed.
+# answers with the image under it (or a miss). Raster images are handed over as
+# data URLs: the dashboard's Content-Security-Policy allows ``img-src data:``
+# but not an ``http://127.0.0.1`` source, so the presenter cannot load the file
+# itself. Nothing else about the deck is changed.
 PRESENT_HELPER_JS = (
     "<script>(function(){"
     "function pick(el){while(el&&el!==document.documentElement){"
@@ -148,9 +151,14 @@ PRESENT_HELPER_JS = (
     "var bg=getComputedStyle(el).backgroundImage,m=bg&&/url\\((['\"]?)([^'\")]+)\\1\\)/.exec(bg);"
     "if(m&&el.getBoundingClientRect().width>=64)return{kind:'img',src:new URL(m[2],location.href).href,alt:''};"
     "el=el.parentElement;}return null;}"
+    "function reply(msg){parent.postMessage(msg,'*');}"
+    "function asData(hit){if(/^data:/.test(hit.src))return reply(Object.assign({type:'hs-zoom'},hit));"
+    "fetch(hit.src).then(function(r){return r.blob();}).then(function(b){var fr=new FileReader();"
+    "fr.onload=function(){reply({type:'hs-zoom',kind:'img',src:fr.result,alt:hit.alt});};fr.readAsDataURL(b);})"
+    ".catch(function(){reply({type:'hs-miss'});});}"
     "addEventListener('message',function(e){var m=e.data||{};if(m.type!=='hs-hit')return;"
     "var hit=pick(document.elementFromPoint(m.x,m.y));"
-    "parent.postMessage(hit?Object.assign({type:'hs-zoom'},hit):{type:'hs-miss'},'*');});"
+    "if(!hit)return reply({type:'hs-miss'});if(hit.kind==='img')return asData(hit);reply(Object.assign({type:'hs-zoom'},hit));});"
     "})();</script>"
 )
 _BODY_END_RE = re.compile(r"</body>", re.I)

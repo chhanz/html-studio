@@ -187,14 +187,19 @@ test('present opens an in-app presenter at the current slide', async ({ page }) 
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
   const zoom = page.getByTestId('present-zoom')
   await expect(zoom).toBeVisible()
-  await expect(zoom.locator('img')).toHaveAttribute('src', /img\/chart\.png$/)
+  // Handed over as a data URL: the dashboard CSP forbids http: image sources.
+  await expect(zoom.locator('img')).toHaveAttribute('src', /^data:image\/png;base64,/)
+  await expect.poll(() => zoom.locator('img').evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0)).toBe(true)
   await expect(zoom).toHaveAccessibleName('Uptime chart')
   await page.keyboard.press('Escape') // closes the lightbox only
   await expect(zoom).toHaveCount(0)
   await expect(dialog).toBeVisible()
   await expect(frame.locator('#hs-counter')).toHaveText('3 / 4')
 
-  await page.getByTestId('present-shield').click({ position: { x: 5, y: 5 } }) // miss → next
+  await page.getByTestId('present-shield').click({ position: { x: 5, y: 5 } }) // miss: clicks never navigate
+  await page.waitForTimeout(200)
+  await expect(frame.locator('#hs-counter')).toHaveText('3 / 4')
+  await page.keyboard.press('ArrowRight')
   await expect(frame.locator('#hs-counter')).toHaveText('4 / 4')
   await page.keyboard.press('Escape')
   await expect(dialog).toHaveCount(0)

@@ -2,6 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<!-- Same image policy as the real dashboard: an http://127.0.0.1 image is blocked, so the presenter must hand over data URLs. -->
+<meta http-equiv="Content-Security-Policy" content="img-src 'self' data: blob: https:">
 <title>html-studio E2E harness</title>
 <!--
   Stands in for the Kiro Crew dashboard around the app:

@@ -26,7 +26,7 @@ type Zoom = { kind: 'img'; src: string; alt: string } | { kind: 'svg'; svg: stri
  *    the iframe so keys arrive here (capture phase) whatever runtime the deck
  *    uses. A click on the shield is sent to the deck as a hit test (the deck is
  *    another origin, so we cannot look ourselves): an image under the pointer
- *    opens the lightbox, anything else advances, like a clicker.
+ *    opens the lightbox. Clicks never navigate; keys do.
  *  - Closing never waits on the Fullscreen API: unmount first, then exit
  *    fullscreen best-effort. The shell can lower the window without firing
  *    fullscreenchange, so a watchdog compares the viewport with the screen.
@@ -84,10 +84,6 @@ export function Presenter({ t, url, startSlide, slideCount, onClose }: Props) {
   )
 
   // F: none. Esc is the single exit (fullscreen and presentation are one thing).
-  const goRef = useRef(go)
-  goRef.current = go
-  const currentRef = useRef(current)
-  currentRef.current = current
 
   // Ask the deck what is under the pointer; it answers hs-zoom or hs-miss.
   const hitTest = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -134,7 +130,7 @@ export function Presenter({ t, url, startSlide, slideCount, onClose }: Props) {
       else if (m.type === 'hs-exit') close()
       else if (m.type === 'hs-zoom' && m.kind === 'img' && typeof m.src === 'string') setZoom({ kind: 'img', src: m.src, alt: m.alt ?? '' })
       else if (m.type === 'hs-zoom' && m.kind === 'svg' && typeof m.svg === 'string') setZoom({ kind: 'svg', svg: m.svg })
-      else if (m.type === 'hs-miss') goRef.current(currentRef.current + 1)
+      // hs-miss: nothing under the pointer worth enlarging; clicks do not navigate.
     }
     window.addEventListener('message', onMsg)
     return () => window.removeEventListener('message', onMsg)
@@ -197,16 +193,8 @@ export function Presenter({ t, url, startSlide, slideCount, onClose }: Props) {
         className="flex-1 w-full h-full border-0"
       />
       {/* Click shield: keeps focus here; a click is hit-tested in the deck
-          (image → lightbox, otherwise next). Right-click = previous. */}
-      <div
-        data-testid="present-shield"
-        className="absolute inset-0"
-        onClick={hitTest}
-        onContextMenu={(e) => {
-          e.preventDefault()
-          go(current - 1)
-        }}
-      />
+          (image → lightbox). Clicks never navigate. */}
+      <div data-testid="present-shield" className="absolute inset-0" onClick={hitTest} />
       {zoom && (
         <div
           data-testid="present-zoom"
