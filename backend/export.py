@@ -15,6 +15,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import uuid
@@ -43,7 +44,15 @@ def find_browser() -> str | None:
     env = os.environ.get("HTML_STUDIO_CHROME")
     if env and Path(env).is_file():
         return env
-    cache_roots = [Path.home() / "Library" / "Caches" / "ms-playwright", Path.home() / ".cache" / "ms-playwright"]
+    # HOME may be redirected (sandboxes, test harnesses); also look at the account's
+    # real home so a Playwright-installed headless shell is found either way.
+    homes = {Path.home()}
+    try:
+        import pwd
+        homes.add(Path(pwd.getpwuid(os.getuid()).pw_dir))
+    except (ImportError, KeyError):
+        pass
+    cache_roots = [h / sub for h in homes for sub in (Path("Library/Caches/ms-playwright"), Path(".cache/ms-playwright"))]
     patterns = [
         "chromium_headless_shell-*/chrome-headless-shell-*/chrome-headless-shell",
         "chromium-*/chrome-*/Chromium.app/Contents/MacOS/Chromium",
@@ -70,15 +79,26 @@ def find_browser() -> str | None:
 def render_pdf(browser: str, url: str, out_path: Path, *, timeout: int = PDF_TIMEOUT_SEC) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     tmp = out_path.with_suffix(".pdf.part")
-    cmd = [
-        browser, "--headless", "--disable-gpu", "--no-sandbox", "--hide-scrollbars",
-        "--run-all-compositor-stages-before-draw", "--virtual-time-budget=3000",
-        "--no-pdf-header-footer", f"--print-to-pdf={tmp}", url,
-    ]
-    env = {k: v for k, v in os.environ.items() if k in ("PATH", "HOME", "TMPDIR", "LANG", "LC_ALL")}
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env, check=False)
+    # A throwaway profile plus mock keychain / basic password store: without
+    # them a fresh Chromium tries to create its "Safe Storage" key in the OS
+    # keychain, which pops a system dialog and blocks the render until answered.
+    with tempfile.TemporaryDirectory(prefix="html-studio-pdf-") as profile:
+        cmd = [
+            browser, "--headless", "--disable-gpu", "--no-sandbox", "--hide-scrollbars",
+            f"--user-data-dir={profile}", "--use-mock-keychain", "--password-store=basic",
+            "--no-first-run", "--no-default-browser-check", "--disable-extensions",
+            "--run-all-compositor-stages-before-draw", "--virtual-time-budget=3000",
+            "--no-pdf-header-footer", f"--print-to-pdf={tmp}", url,
+        ]
+        env = {k: v for k, v in os.environ.items() if k in ("PATH", "HOME", "TMPDIR", "LANG", "LC_ALL")}
+        # stderr to a file rather than a pipe: Chromium's helper processes can
+        # keep a pipe open after the main process exits and stall the wait.
+        with open(Path(profile) / "stderr.log", "w+", encoding="utf-8") as errf:
+            proc = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=errf, timeout=timeout, env=env, check=False)
+            errf.seek(0)
+            stderr_text = errf.read()
     if not tmp.is_file() or tmp.stat().st_size == 0:
-        err = (proc.stderr or "").strip().splitlines()
+        err = stderr_text.strip().splitlines()
         # Chromium logs harmless noise on stderr; keep only the tail for diagnosis.
         raise RuntimeError("pdf render produced no file: " + " | ".join(err[-3:]) if err else "pdf render produced no file")
     os.replace(tmp, out_path)

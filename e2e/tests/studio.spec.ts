@@ -175,6 +175,7 @@ test('present opens the built deck in a popup at the current slide', async ({ pa
 })
 
 test('exports the built deck to PDF', async ({ page }) => {
+  test.setTimeout(120_000) // headless Chromium cold start can be slow
   await openApp(page)
   await addFixtureRoot(page)
   await selectDeck(page, 'acme-quarterly')
