@@ -105,7 +105,7 @@ class ServerTest(unittest.TestCase):
         code, data = self.request("GET", "/api/status", signed=True)
         self.assertEqual(code, 200)
         self.assertEqual(data["app"], "html-studio")
-        self.assertEqual(data["version"], "0.1.7")
+        self.assertEqual(data["version"], "0.1.8")
         self.assertTrue(data["dataDir"].startswith(self.tmp.name))
 
     def test_signed_unknown_route_is_404(self) -> None:
@@ -209,8 +209,12 @@ class ServerTest(unittest.TestCase):
             body = json.dumps({"path": str(deck)}).encode()
             code, data = self.request("POST", "/api/present", signed=True, body=body)
             self.assertEqual((code, data["error"]), (409, "no_output"))
+            # PDF no longer needs a build: it renders the preview's /print document.
             code, data = self.request("POST", "/api/pdf", signed=True, body=body)
-            self.assertIn(data["error"], ("no_output", "no_browser"))
+            if code == 200:
+                self.assertEqual(data["state"], "running")
+            else:
+                self.assertEqual(data["error"], "no_browser")
             code, data = self.request("GET", "/api/pdf?id=nope", signed=True)
             self.assertEqual((code, data["error"]), (404, "unknown_job"))
             self.request("POST", "/api/roots/remove", signed=True,

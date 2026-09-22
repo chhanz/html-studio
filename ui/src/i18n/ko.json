@@ -74,7 +74,7 @@
   "error.unknown_route": "실행 중인 백엔드가 앱 UI보다 오래된 버전입니다. App Store에서 앱을 끄고 다시 켜 백엔드를 재시작하세요.",
   "present.hint": "현재 슬라이드부터 전체화면으로 발표",
   "present.need_output": "먼저 덱을 빌드하세요",
-  "pdf.hint": "빌드된 덱을 PDF로 내보내기",
+  "pdf.hint": "모든 슬라이드를 PDF로 내보내기(슬라이드 1장 = 1페이지)",
   "pdf.done": "PDF 저장됨 ({kb} KB)",
   "pdf.reveal": "폴더에서 보기",
   "error.no_output": "먼저 덱을 빌드하세요.",

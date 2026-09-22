@@ -483,8 +483,8 @@ export default function HtmlStudio() {
               </SmallBtn>
               <SmallBtn
                 onClick={() => void exportPdf()}
-                disabled={!outputUrl || pdf?.state === 'running'}
-                title={outputUrl ? t('pdf.hint') : t('present.need_output')}
+                disabled={!preview || pdf?.state === 'running'}
+                title={t('pdf.hint')}
                 className="inline-flex items-center gap-1.5"
               >
                 {pdf?.state === 'running' && <Spinner />}

@@ -74,7 +74,7 @@
   "error.unknown_route": "The running backend is older than the app UI. Turn the app off and on in the App Store to restart it.",
   "present.hint": "Present full-screen from the current slide",
   "present.need_output": "Build the deck first",
-  "pdf.hint": "Export the built deck to PDF",
+  "pdf.hint": "Export every slide to PDF (one slide per page)",
   "pdf.done": "PDF saved ({kb} KB)",
   "pdf.reveal": "Show in folder",
   "error.no_output": "Build the deck first.",

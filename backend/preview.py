@@ -8,6 +8,7 @@ session cookie.
 Routes (all GET):
   /health                    liveness
   /slide/<index>             one slide fragment wrapped into a full page
+  /print                     every slide as one 1280x720 page (PDF export)
   /assets/<path>, /img/<path>, /out/<path>
                              static files from the deck folder (contained)
 
@@ -220,6 +221,45 @@ class DeckPreview:
         fragment = files[index].read_text(encoding="utf-8", errors="replace")
         return wrap_slide(fragment, css_href=self._css_href(), title=files[index].name, page_number=index + 1)
 
+    def render_print(self) -> str:
+        """One document with every slide laid out as a 1280x720 page, for PDF export.
+
+        This is what "print this deck in Chrome" would render: the deck's own
+        stylesheet (including its ``@media print`` rules) plus a small forced
+        layout so each slide is exactly one page, whatever runtime built the
+        deck (or none). No app chrome, no dark backdrop, no counter.
+        """
+        head_extra = ""
+        if self.entry:
+            text = self._entry_text()
+            head_extra, hidden = inherited_chrome(text)
+            fragments = [hidden + sec for sec in split_sections(text)]
+            title = self.entry
+        else:
+            fragments = [f.read_text(encoding="utf-8", errors="replace") for f in self.slide_files()]
+            title = self.deck_dir.name
+        css_href = None if head_extra else self._css_href()
+        link = f'<link rel="stylesheet" href="{html.escape(css_href, quote=True)}">' if css_href else ""
+        inline = "" if (css_href or head_extra) else f"<style>{default_theme_css()}</style>"
+        force = (
+            "<style>"
+            f"@page{{size:{STAGE_W}px {STAGE_H}px;margin:0}}"
+            f"html,body{{margin:0;padding:0;background:#fff;width:{STAGE_W}px}}"
+            "*,*::before,*::after{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}"
+            ".hs-print>.slide:not(.is-hidden):not([hidden]){display:flex!important;position:relative!important;inset:auto!important;"
+            f"width:{STAGE_W}px!important;height:{STAGE_H}px!important;margin:0!important;overflow:hidden;"
+            "break-after:page;page-break-after:always;break-inside:avoid;page-break-inside:avoid;animation:none!important;transition:none!important}"
+            ".hs-print>.slide:last-child{break-after:auto;page-break-after:auto}"
+            ".hs-print .slide *{animation:none!important;transition:none!important}"
+            "</style>"
+        )
+        body = "".join(_inject_pageno(frag, i + 1) for i, frag in enumerate(fragments))
+        return (
+            "<!doctype html><html><head><meta charset=\"utf-8\"><base href=\"/\">"
+            f"<title>{html.escape(title)}</title>{head_extra}{link}{inline}{force}</head>"
+            f"<body class=\"hs-print stage\">{body}</body></html>"
+        )
+
     def _css_href(self) -> str | None:
         return f"/{self.css_rel}" if self.css_rel and (self.deck_dir / self.css_rel).is_file() else None
 
@@ -242,6 +282,8 @@ class DeckPreview:
         path = urlsplit(h.path).path
         if path == "/health":
             return _send(h, 200, b'{"status":"ok"}', "application/json")
+        if path == "/print":
+            return _send(h, 200, self.render_print().encode("utf-8"), "text/html; charset=utf-8")
         if path.startswith("/slide/"):
             try:
                 idx = int(path[len("/slide/"):])

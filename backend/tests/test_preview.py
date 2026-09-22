@@ -167,5 +167,31 @@ class SingleFileTests(unittest.TestCase):
             self.assertIsNone(p.render_slide(2))
 
 
+class PrintDocumentTests(unittest.TestCase):
+    def test_print_document_has_every_slide_and_page_rules(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            deck = Path(tmp) / "deck"
+            (deck / "slides").mkdir(parents=True)
+            (deck / "deck.css").write_text(".slide{background:red}")
+            for i in range(3):
+                (deck / "slides" / f"{(i + 1) * 10:03d}.html").write_text(
+                    f"<section class='slide'><h1>S{i}</h1><footer class='botbar'><span class='pg'></span></footer></section>"
+                )
+            p = preview.DeckPreview(deck, "slides", "deck.css")
+            doc = p.render_print()
+            self.assertEqual(doc.count("<section"), 3)
+            self.assertIn("@page{size:1280px 720px;margin:0}", doc)
+            self.assertIn('href="/deck.css"', doc)
+            self.assertIn('<base href="/">', doc)
+            self.assertNotIn("hs-counter", doc)
+            port = p.start()
+            try:
+                with urllib.request.urlopen(f"http://127.0.0.1:{port}/print") as r:
+                    self.assertEqual(r.status, 200)
+                    self.assertIn(b"hs-print", r.read())
+            finally:
+                p.stop()
+
+
 if __name__ == "__main__":
     unittest.main()

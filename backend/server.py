@@ -39,7 +39,7 @@ PDF_JOBS = export_lib.ExportJobs()
 PREVIEWS = preview_lib.PreviewRegistry()
 
 APP_NAME = os.environ.get("KIROCREW_APP_NAME", "html-studio")
-APP_VERSION = "0.1.7"
+APP_VERSION = "0.1.8"
 PORT = int(os.environ.get("PORT", "9100"))
 HOME = Path(os.environ.get("KIROCREW_HOME", str(Path.home() / ".kiro" / "crew")))
 DATA_DIR = HOME / "apps" / APP_NAME / "data"
@@ -357,12 +357,14 @@ def route_pdf_start(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
     browser = export_lib.find_browser()
     if browser is None:
         return 400, {"error": "no_browser"}
-    target = _output_url(deck)
-    if target is None:
-        return 409, {"error": "no_output"}
-    base, output = target
+    # The PDF is rendered from the preview server's /print document (every slide
+    # as one page, with the deck's own print CSS), so no build is required.
+    info = deck_lib.describe_deck(deck, deck)
+    if info is None:
+        return 409, {"error": "not_a_deck"}
+    p = PREVIEWS.ensure(deck, info["slidesDir"], _deck_css(deck), entry=info.get("entry"))
     out_path = deck / export_lib.safe_pdf_name(deck.name)
-    job_id = PDF_JOBS.start(browser, f"{base}/{output}", out_path)
+    job_id = PDF_JOBS.start(browser, f"http://127.0.0.1:{p.port}/print", out_path)
     return 200, {"id": job_id, "state": "running", "output": str(out_path)}
 
 
