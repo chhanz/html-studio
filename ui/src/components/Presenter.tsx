@@ -27,6 +27,18 @@ export function Presenter({ t, url, startSlide, slideCount, onClose }: Props) {
   const [chrome, setChrome] = useState(true)
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Leave fullscreen explicitly before unmounting: Electron does not always
+  // fire fullscreenchange for Esc, and unmounting while fullscreen leaves the
+  // window stuck until the user presses Esc again.
+  const close = useCallback(async () => {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen()
+    } catch {
+      /* ignore */
+    }
+    onClose()
+  }, [onClose])
+
   const post = useCallback((msg: Record<string, unknown>) => {
     frameRef.current?.contentWindow?.postMessage(msg, '*')
   }, [])
@@ -64,7 +76,7 @@ export function Presenter({ t, url, startSlide, slideCount, onClose }: Props) {
     const onChange = () => {
       const fs = !!document.fullscreenElement
       setFullscreen(fs)
-      if (!fs && wasFullscreen.current) onClose()
+      if (!fs && wasFullscreen.current) onClose() // user left fullscreen (Esc/OS gesture)
       if (fs) wasFullscreen.current = true
     }
     document.addEventListener('fullscreenchange', onChange)
@@ -83,18 +95,18 @@ export function Presenter({ t, url, startSlide, slideCount, onClose }: Props) {
       const m = e.data as { type?: string; index?: number } | null
       if (e.source !== frameRef.current?.contentWindow || !m) return
       if (m.type === 'hs-slide' && typeof m.index === 'number') setCurrent(m.index + 1)
-      else if (m.type === 'hs-exit') onClose()
+      else if (m.type === 'hs-exit') void close()
     }
     window.addEventListener('message', onMsg)
     return () => window.removeEventListener('message', onMsg)
-  }, [onClose])
+  }, [close])
 
   // Keyboard: handled here so it works even when the iframe has no focus.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault()
-        onClose()
+        void close()
       } else if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') {
         e.preventDefault()
         go(current + 1)
@@ -111,7 +123,7 @@ export function Presenter({ t, url, startSlide, slideCount, onClose }: Props) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [current, go, onClose, slideCount, toggleFullscreen])
+  }, [current, go, close, slideCount, toggleFullscreen])
 
   // Auto-hide the control bar while the pointer is still.
   const poke = () => {
@@ -156,7 +168,7 @@ export function Presenter({ t, url, startSlide, slideCount, onClose }: Props) {
           <SmallBtn onClick={() => void toggleFullscreen()} style={{ color: '#ddd', borderColor: '#555' }}>
             {fullscreen ? t('present.exit_fullscreen') : t('present.fullscreen')}
           </SmallBtn>
-          <SmallBtn onClick={onClose} style={{ color: '#ddd', borderColor: '#555' }}>{t('present.close')}</SmallBtn>
+          <SmallBtn onClick={() => void close()} style={{ color: '#ddd', borderColor: '#555' }}>{t('present.close')}</SmallBtn>
         </span>
       </div>
     </div>
