@@ -177,6 +177,8 @@ test('present opens an in-app presenter at the current slide', async ({ page }) 
   await expect(frame.locator('#hs-counter')).toHaveText('4 / 4')
   await page.mouse.move(400, 300) // control bar auto-hides; a pointer move reveals it
   await expect(dialog.getByText('4 / 4')).toBeVisible()
+  await page.keyboard.press('ArrowLeft')
+  await expect(frame.locator('#hs-counter')).toHaveText('3 / 4')
 
   // Headless Chromium has no real fullscreen: stub it and check the wiring.
   // F pressed INSIDE the deck iframe must reach the presenter and request
@@ -189,7 +191,8 @@ test('present opens an in-app presenter at the current slide', async ({ page }) 
     ;(document as any).exitFullscreen = () => { fsEl = null; document.dispatchEvent(new Event('fullscreenchange')); return Promise.resolve() }
     Object.defineProperty(document, 'fullscreenElement', { get: () => fsEl, configurable: true })
   })
-  await frame.locator('.slide.active').click()
+  await page.getByTestId('present-shield').click() // click = next, and keeps focus on the presenter
+  await expect(frame.locator('#hs-counter')).toHaveText('4 / 4')
   await page.keyboard.press('f')
   await expect.poll(() => page.evaluate(() => (window as any).__fsCalls)).toBe(1)
   await expect(dialog).toBeVisible()

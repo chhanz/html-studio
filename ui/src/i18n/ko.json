@@ -83,7 +83,7 @@
   "error.pdf_failed": "PDF 렌더링에 실패했습니다.",
   "error.open_failed": "시스템 브라우저를 열 수 없습니다.",
   "present.title": "발표",
-  "present.keys": "← → 이동 · Esc 또는 F 종료",
+  "present.keys": "← → 또는 클릭: 이동 · Esc / F: 종료",
   "present.fullscreen": "전체화면",
   "present.close": "종료",
   "present.browser": "브라우저에서 열기",
