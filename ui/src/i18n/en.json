@@ -83,7 +83,7 @@
   "error.pdf_failed": "PDF rendering failed.",
   "error.open_failed": "Could not open the system browser.",
   "present.title": "Presentation",
-  "present.keys": "← → or click: navigate · Esc / F: exit",
+  "present.keys": "← → or click: navigate · Esc: exit",
   "present.fullscreen": "Fullscreen",
   "present.close": "Exit",
   "present.browser": "Open in browser",

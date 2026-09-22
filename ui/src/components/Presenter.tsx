@@ -18,8 +18,8 @@ type Props = {
  * built deck in an iframe, taken to real fullscreen with the Fullscreen API.
  *
  * Design notes (learned the hard way in the Electron shell):
- *  - Presenting IS fullscreen. Leaving fullscreen by any route ends the
- *    presentation, and ending the presentation leaves fullscreen.
+ *  - Presenting IS fullscreen. Leaving fullscreen by any route (Esc, the OS
+ *    control) ends the presentation, and ending the presentation leaves fullscreen.
  *  - Keyboard never depends on where focus is: a transparent shield sits over
  *    the iframe so keys arrive here (capture phase) whatever runtime the deck
  *    uses. Click on the shield = next slide, like a clicker.
@@ -46,8 +46,14 @@ export function Presenter({ t, url, startSlide, slideCount, onClose }: Props) {
 
   const enterFullscreen = useCallback(() => {
     const el = rootRef.current
-    if (!el || document.fullscreenElement) return
-    el.requestFullscreen().catch(() => undefined) // refused: stay as an overlay; F / button retry
+    if (!el) return
+    const req = () => el.requestFullscreen().catch(() => undefined) // refused: stay as an overlay; button retries
+    const cur = document.fullscreenElement
+    if (cur === el) return
+    // A previous presentation may have left a stale fullscreen element behind
+    // (the shell lowered the window without telling the document). Clear it first.
+    if (cur) document.exitFullscreen().then(req, req)
+    else void req()
   }, [])
 
   const post = useCallback((msg: Record<string, unknown>) => {
@@ -67,12 +73,6 @@ export function Presenter({ t, url, startSlide, slideCount, onClose }: Props) {
     [post, slideCount, url],
   )
 
-  // F: enter fullscreen if we are not, otherwise end the presentation.
-  const toggle = useCallback(() => {
-    if (document.fullscreenElement) close()
-    else enterFullscreen()
-  }, [close, enterFullscreen])
-
   useEffect(() => {
     rootRef.current?.focus()
     enterFullscreen()
@@ -83,12 +83,16 @@ export function Presenter({ t, url, startSlide, slideCount, onClose }: Props) {
       else if (wasFullscreen.current) close()
     }
     document.addEventListener('fullscreenchange', onChange)
-    // Watchdog: the window left fullscreen without telling the document.
+    // Watchdog: the shell can lower the window (Esc, green button) without a
+    // fullscreenchange on the document. Arm only once the window has actually
+    // reached screen size, so the entry animation is never mistaken for an exit.
+    let windowWasFullscreen = false
     const tick = setInterval(() => {
-      if (!wasFullscreen.current || closed.current) return
+      if (closed.current) return
       const windowIsFullscreen = window.innerHeight >= screen.height - 40 && window.innerWidth >= screen.width - 40
-      if (!document.fullscreenElement || !windowIsFullscreen) close()
-    }, 400)
+      if (windowIsFullscreen) windowWasFullscreen = true
+      else if (windowWasFullscreen) close()
+    }, 250)
     return () => {
       document.removeEventListener('fullscreenchange', onChange)
       clearInterval(tick)
@@ -104,11 +108,10 @@ export function Presenter({ t, url, startSlide, slideCount, onClose }: Props) {
       if (e.source !== frameRef.current?.contentWindow || !m) return
       if (m.type === 'hs-slide' && typeof m.index === 'number') setCurrent(m.index + 1)
       else if (m.type === 'hs-exit') close()
-      else if (m.type === 'hs-fullscreen') toggle()
     }
     window.addEventListener('message', onMsg)
     return () => window.removeEventListener('message', onMsg)
-  }, [close, toggle])
+  }, [close])
 
   // Keyboard, capture phase: fires before any host handler and regardless of focus.
   useEffect(() => {
@@ -119,14 +122,13 @@ export function Presenter({ t, url, startSlide, slideCount, onClose }: Props) {
       else if (e.key === 'ArrowLeft' || e.key === 'PageUp' || e.key === 'Backspace') go(current - 1)
       else if (e.key === 'Home') go(1)
       else if (e.key === 'End') go(slideCount)
-      else if (e.key === 'f' || e.key === 'F') toggle()
       else return
       e.preventDefault()
       e.stopPropagation()
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [current, go, close, slideCount, toggle])
+  }, [current, go, close, slideCount])
 
   // Auto-hide the control bar while the pointer is still.
   const poke = () => {

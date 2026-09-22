@@ -151,7 +151,7 @@ function fit(){var st=document.querySelector('.hs-stage');if(!st)return;var k=Ma
 function full(){var d=document.documentElement;if(document.fullscreenElement)document.exitFullscreen&&document.exitFullscreen();else if(d.requestFullscreen)d.requestFullscreen().catch(function(){});}
 addEventListener('keydown',function(e){if(e.key==='ArrowRight'||e.key==='PageDown'||e.key===' ')show(i+1);
 else if(e.key==='ArrowLeft'||e.key==='PageUp')show(i-1);else if(e.key==='Home')show(0);else if(e.key==='End')show(s.length-1);
-else if(e.key==='f'||e.key==='F'){if(parent!==window)parent.postMessage({type:'hs-fullscreen'},'*');else full();}else if(e.key==='p'||e.key==='P')print();else if(e.key==='Escape'&&parent!==window)parent.postMessage({type:'hs-exit'},'*');});
+else if((e.key==='f'||e.key==='F')&&parent===window)full();else if(e.key==='p'||e.key==='P')print();else if(e.key==='Escape'&&parent!==window)parent.postMessage({type:'hs-exit'},'*');});
 addEventListener('message',function(e){var m=e.data||{};if(m.type==='hs-go')show((m.index|0));else if(m.type==='hs-step')show(i+(m.delta|0));else if(m.type==='hs-fullscreen')full();});
 addEventListener('hashchange',function(){var h=parseInt(location.hash.slice(1),10);if(!isNaN(h))show(h-1);});
 addEventListener('resize',fit);var h=parseInt(location.hash.slice(1),10);show(isNaN(h)?0:h-1);fit();})();
