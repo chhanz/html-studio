@@ -50,18 +50,19 @@ _PICK_FOLDER_PROMPT = "Choose a folder that contains slide decks"
 
 
 def _pick_folder_script(start_dir: str | None) -> str:
+    # `choose folder` runs OUTSIDE the tell block on purpose: inside it the
+    # command is sent to System Events as an Apple event, which a sandboxed
+    # backend may not be allowed to do; outside, osascript handles it itself.
     where = f' default location (POSIX file "{start_dir}")' if start_dir else ""
     return "\n".join(
         [
-            'tell application "System Events"',
-            "  activate",
-            "  try",
-            f'    set chosen to choose folder with prompt "{_PICK_FOLDER_PROMPT}"{where}',
-            "    return POSIX path of chosen",
-            "  on error number -128",
-            '    return ""',
-            "  end try",
-            "end tell",
+            'tell application "System Events" to activate',
+            "try",
+            f'  set chosen to choose folder with prompt "{_PICK_FOLDER_PROMPT}"{where}',
+            "  return POSIX path of chosen",
+            "on error number -128",
+            '  return ""',
+            "end try",
         ]
     )
 
@@ -131,7 +132,9 @@ def _pick_folder() -> str | None:
         capture_output=True, text=True, timeout=_PICK_FOLDER_TIMEOUT, check=False,
     )
     if proc.returncode != 0:
-        raise RuntimeError("folder chooser failed")
+        detail = (proc.stderr or proc.stdout or "").strip().replace("\n", " ")[:300]
+        _log(f"folder chooser failed rc={proc.returncode}: {detail}")
+        raise RuntimeError(f"osascript exited {proc.returncode}: {detail or 'no output'}")
     path = proc.stdout.strip().rstrip("/")
     return path or None
 
