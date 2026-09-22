@@ -1,9 +1,9 @@
-import { useAppApi, useNavigate } from '@kirocrew/app-sdk'
+import { useAppApi } from '@kirocrew/app-sdk'
 import { Card, CardTitle, PageHeader } from '@kirocrew/app-sdk/ui'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ApiError, type BackendStatus, type BuildInfo, type BuildResult, type Deck, type PdfJob, type PreviewInfo, makeClient } from './api'
-import { openDeckChat } from './chat'
 import { BuildPanel } from './components/BuildPanel'
+import { DeckChat } from './components/DeckChat'
 import { DeckPanel } from './components/DeckPanel'
 import { Presenter } from './components/Presenter'
 import { Section, useCollapsed } from './components/Section'
@@ -135,28 +135,8 @@ export default function HtmlStudio() {
   const [pdf, setPdf] = useState<PdfJob | null>(null)
   const [pdfError, setPdfError] = useState<string | null>(null)
 
-  // P1-7: one chat session per deck, project-scoped to the deck folder.
-  const navigate = useNavigate()
-  const [chatBusy, setChatBusy] = useState(false)
-  const [chatError, setChatError] = useState<string | null>(null)
-  const openChat = useCallback(async () => {
-    if (!selected || chatBusy) return
-    setChatBusy(true)
-    setChatError(null)
-    try {
-      const { key } = await openDeckChat(
-        api,
-        { deck: selected, preview, build: buildInfo, language: locale },
-        t('chat.title', { name: selected.name }),
-      )
-      navigate(`/chat?sid=${encodeURIComponent(key)}`)
-    } catch (e) {
-      // Dashboard routes are not wrapped by our client: surface the SDK's message.
-      setChatError(e instanceof Error ? e.message : 'chat_failed')
-    } finally {
-      setChatBusy(false)
-    }
-  }, [api, selected, preview, buildInfo, locale, t, navigate, chatBusy])
+  // P1-7: the deck's chat lives in the pane under the preview (DeckChat).
+  const [chatOpen, setChatOpen] = useCollapsed('chat', true)
   useEffect(() => {
     setPdf(null)
     setPdfError(null)
@@ -322,9 +302,7 @@ export default function HtmlStudio() {
   const statusText =
     conn === 'connecting' ? t('status.connecting') : conn === 'connected' ? t('status.connected') : t('status.error')
 
-  const gridCols = sidebarOpen
-    ? 'minmax(200px, 1fr) minmax(320px, 3fr) minmax(220px, 1.4fr)'
-    : '36px minmax(320px, 3fr) minmax(220px, 1.4fr)'
+  const gridCols = sidebarOpen ? 'minmax(200px, 1fr) minmax(320px, 4fr)' : '36px minmax(320px, 4fr)'
 
   // The host may or may not give this page a bounded height. Measure the header
   // block ourselves and size the grid from the viewport so every pane has a real
@@ -364,7 +342,7 @@ export default function HtmlStudio() {
       </div>
       </div>
 
-      {/* Layout: sidebar | preview | chat. Stacks below 1100px. */}
+      {/* Layout: sidebar | (preview / deck chat). Stacks below 1100px. */}
       <div
         className="hs-grid px-6 pb-6 grid gap-3"
         style={{
@@ -381,6 +359,10 @@ export default function HtmlStudio() {
              columns, so the body is the ONE element that scrolls. */
           .hs-grid > div { min-height: 0; display: flex; flex-direction: column; }
           .hs-grid > div > *, .hs-grid > div > * > * { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+          /* Right column: two cards share the height (inline flex-basis on each wrapper). */
+          .hs-grid .hs-right > div > * { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+          .hs-grid .hs-right > div > * > * { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+          .hs-grid .hs-right-chat[style*="0 0 auto"] > * > * { flex: 0 0 auto; }
           .hs-grid .hs-fill { flex: 1 1 auto; min-height: 0; }
           .hs-grid .hs-scroll { overflow-y: auto !important; }
           .hs-grid section[data-grow="true"] { flex: 1 1 auto; min-height: 0; }
@@ -461,8 +443,9 @@ export default function HtmlStudio() {
           </div>
         )}
 
-        {/* Preview */}
-        <div className="min-h-0 flex flex-col">
+        {/* Right column: preview above, deck chat below */}
+        <div className="hs-right min-h-0 flex flex-col gap-3">
+        <div className="hs-right-preview min-h-0 flex flex-col" style={{ flex: chatOpen ? '3 1 0' : '1 1 0' }}>
         <Card>
           <div className="hs-fill hs-scroll min-h-0 flex flex-col">
           <div className="flex items-center justify-between gap-2 mb-2 flex-wrap flex-none">
@@ -514,23 +497,8 @@ export default function HtmlStudio() {
                 {pdf?.state === 'running' && <Spinner />}
                 {t('toolbar.pdf')}
               </SmallBtn>
-              <SmallBtn
-                onClick={() => void openChat()}
-                disabled={!selected || chatBusy}
-                title={t('chat.hint')}
-                className="inline-flex items-center gap-1.5"
-              >
-                {chatBusy && <Spinner />}
-                {t('toolbar.chat')}
-              </SmallBtn>
             </div>
           </div>
-          {selected && chatError && (
-            <div className="mb-2 flex-none rounded-md border p-2 text-[12px]" style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }} role="alert">
-              {t('chat.failed')}
-              <span className="block text-muted break-all">{chatError}</span>
-            </div>
-          )}
           {selected && (pdf?.state === 'done' || pdfError) && (
             <div
               className="mb-2 flex-none rounded-md border p-2 text-[12px] flex items-center gap-2 flex-wrap"
@@ -611,12 +579,12 @@ export default function HtmlStudio() {
         </Card>
         </div>
 
-        {/* Chat */}
-        <div className="min-h-0 flex flex-col">
+        {/* Deck chat (under the preview) */}
+        <div className="hs-right-chat min-h-0 flex flex-col" style={{ flex: chatOpen ? '2 1 0' : '0 0 auto' }}>
         <Card>
-          <CardTitle>{t('panel.chat')}</CardTitle>
-          <p className="text-sm text-muted">{t('panel.chat.empty')}</p>
+          <DeckChat t={t} locale={locale} deck={selected} preview={preview} build={buildInfo} open={chatOpen} onToggle={() => setChatOpen(!chatOpen)} />
         </Card>
+        </div>
         </div>
       </div>
       {presenting && selected && outputUrl && preview && (

@@ -14,6 +14,16 @@ declare module '@kirocrew/app-sdk' {
   export function useNavigate(): (to: string) => void
   export function useNotify(): any
   export function useChatLauncher(): { openChat(opts: { agent?: string; message?: string }): void }
+  /** Embedded conversation for one slot (the dashboard's own chat surface). */
+  export const ChatEmbed: import('react').ComponentType<{
+    slotKey: string
+    agent?: string
+    placeholder?: string
+    frameless?: boolean
+    startAtBottom?: boolean
+    onSend?: (text: string) => void
+    aboveComposer?: import('react').ReactNode
+  }>
 }
 
 declare module '@kirocrew/app-sdk/ui' {

@@ -121,6 +121,7 @@ function serveFile(res, root, rel) {
 }
 
 // Stand-in for the dashboard's chat API, just enough for the deck-chat flow:
+//   GET  /api/chat/slots                       list
 //   POST /api/chat/slots {name, title}         get-or-create by name → {key, messages, title}
 //   POST /api/chat/slots/<key>/project {project}
 //   POST /api/chat?ws=1 {message, slot}       counts as one message on the slot
@@ -134,6 +135,7 @@ function fakeChatApi(req, res, p, body) {
     res.writeHead(code, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify(obj))
   }
+  if (req.method === 'GET' && p === '/api/chat/slots') return send(200, [...chatSlots.values()])
   if (req.method !== 'POST') return send(405, { error: 'method' })
   if (p === '/api/chat/slots') {
     const name = String(json.name || `chat-${chatSlots.size + 1}`)

@@ -63,6 +63,14 @@ export function deckBrief({ deck, preview, build, language }: BriefInput): strin
 
 export type OpenDeckChatResult = { key: string; created: boolean }
 
+/** Existing session for this deck, if any — read-only, so browsing decks creates nothing. */
+export async function findDeckChat(api: AppApi, deckPath: string): Promise<SlotInfo | null> {
+  const name = await slotNameFor(deckPath)
+  const list = (await api.get('/api/chat/slots')) as unknown
+  const slots = Array.isArray(list) ? (list as SlotInfo[]) : []
+  return slots.find((s) => s.key === name) ?? null
+}
+
 /**
  * Ensure the deck's session exists, points at the deck folder, and (if new)
  * carries the brief. Returns the slot key to navigate to (`/chat?sid=<key>`).

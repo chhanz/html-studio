@@ -14,8 +14,8 @@
   "panel.slides.empty": "덱을 선택하면 슬라이드가 여기에 표시됩니다.",
   "panel.preview": "미리보기",
   "panel.preview.empty": "덱을 선택하면 여기에 표시됩니다.",
-  "panel.chat": "덱 대화",
-  "panel.chat.empty": "덱을 열면 대화를 시작할 수 있습니다.",
+  "panel.chat": "덱 채팅",
+  "panel.chat.empty": "덱을 선택하면 그 덱에 대해 대화할 수 있습니다.",
   "roots.add": "덱 추가",
   "roots.picking": "폴더 선택 창 여는 중…",
   "roots.path_placeholder": "~/Documents/decks",
@@ -89,8 +89,12 @@
   "present.close": "종료",
   "present.browser": "브라우저에서 열기",
   "present.browser_hint": "빌드된 덱을 기본 브라우저에서 열기(두 번째 화면용)",
-  "toolbar.chat": "채팅",
-  "chat.hint": "이 덱의 채팅 세션 열기(에이전트가 덱 폴더 안에서 작업)",
   "chat.title": "HTML Studio · {name}",
-  "chat.failed": "덱 채팅을 열 수 없습니다"
+  "chat.failed": "덱 채팅을 열 수 없습니다",
+  "chat.none": "{name}의 세션이 아직 없습니다.",
+  "chat.start": "덱 채팅 시작",
+  "chat.retry": "다시 시도",
+  "chat.open_full": "채팅 화면에서 열기",
+  "chat.open_full_hint": "이 세션을 채팅 페이지에서 열기",
+  "chat.placeholder": "{name}에 바꿀 점을 말해 주세요…"
 }

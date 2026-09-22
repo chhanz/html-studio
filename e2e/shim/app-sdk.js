@@ -4,7 +4,7 @@
 //    with the parsed body attached, and refuses paths the manifest's
 //    permissions.api does not cover (the real SDK does the same client-side).
 //  * everything else is a harmless stub.
-import { useMemo } from 'react'
+import { createElement, useMemo } from 'react'
 
 let allowed = null
 async function loadAllowed() {
@@ -75,5 +75,9 @@ export function useNotify() {
 }
 export function useChatLauncher() {
   return { openChat: () => {} }
+}
+// The dashboard's embedded conversation surface; here just a marker with its slot.
+export function ChatEmbed({ slotKey, placeholder }) {
+  return createElement('div', { 'data-testid': 'chat-embed', 'data-slot': slotKey, className: 'flex-1 min-h-0 text-sm text-muted p-2' }, `[chat: ${slotKey}] ${placeholder || ''}`)
 }
 export const AppApiProvider = ({ children }) => children
