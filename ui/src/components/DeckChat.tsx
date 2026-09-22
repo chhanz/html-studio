@@ -1,5 +1,4 @@
 import { ChatEmbed, useAppApi, useNavigate } from '@kirocrew/app-sdk'
-import { CardTitle } from '@kirocrew/app-sdk/ui'
 import { useCallback, useEffect, useState } from 'react'
 import type { BuildInfo, Deck, PreviewInfo } from '../api'
 import { findDeckChat, openDeckChat } from '../chat'
@@ -76,12 +75,25 @@ export function DeckChat({ t, locale, deck, preview, build, open, onToggle }: Pr
 
   return (
     <div className="hs-fill min-h-0 flex flex-col" data-testid="deck-chat" data-status={status}>
-      <div className="flex items-center justify-between gap-2 flex-none mb-1">
-        <button type="button" className="inline-flex items-center gap-1 text-left" onClick={onToggle} aria-expanded={open} aria-controls="deck-chat-body">
-          <span className="text-muted" aria-hidden="true">{open ? '▾' : '▸'}</span>
-          <CardTitle>{t('panel.chat')}</CardTitle>
+      <div className="flex items-center gap-2 flex-none">
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={open}
+          aria-controls="deck-chat-body"
+          className="flex-1 min-w-0 flex items-center gap-2 py-1 px-1 -mx-1 rounded-md text-[15px] font-semibold text-text-strong hover:bg-bg-hover cursor-pointer bg-transparent border-0 text-left"
+        >
+          <span
+            aria-hidden
+            className="inline-flex items-center justify-center w-5 h-5 text-[14px] text-muted transition-transform"
+            style={{ transform: open ? 'rotate(90deg)' : 'none' }}
+          >
+            ▸
+          </span>
+          {t('panel.chat')}
+          {!open && <span className="font-normal text-[12px] text-muted truncate">{t('chat.tagline')}</span>}
         </button>
-        <div className="flex gap-1 items-center">
+        <div className="flex gap-1 items-center flex-none">
           {status === 'checking' && <Spinner />}
           {slotKey && (
             <SmallBtn onClick={() => navigate(`/chat?sid=${encodeURIComponent(slotKey)}`)} title={t('chat.open_full_hint')}>
@@ -91,7 +103,7 @@ export function DeckChat({ t, locale, deck, preview, build, open, onToggle }: Pr
         </div>
       </div>
       {open && (
-        <div id="deck-chat-body" className="hs-fill min-h-0 flex flex-col">
+        <div id="deck-chat-body" className="hs-fill min-h-0 flex flex-col mt-1">
           {!deck && <p className="text-sm text-muted">{t('panel.chat.empty')}</p>}
           {deck && status === 'none' && (
             <div className="flex flex-col items-start gap-2">

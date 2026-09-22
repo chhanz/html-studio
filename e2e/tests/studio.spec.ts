@@ -231,6 +231,12 @@ test('deck chat pane: looks up, starts once, embeds the deck session', async ({ 
   const home = await fakeHome(page)
   const pane = page.getByTestId('deck-chat')
   await expect(pane).toHaveAttribute('data-status', 'idle')
+  // Collapsed by default, with a one-line purpose in the header; open it.
+  const header = page.getByRole('button', { name: /Deck chat/ })
+  await expect(header).toHaveAttribute('aria-expanded', 'false')
+  await expect(header).toContainText('ask the agent to change this deck')
+  await header.click()
+  await expect(header).toHaveAttribute('aria-expanded', 'true')
 
   await selectDeck(page, 'acme-quarterly')
   // Selecting only looks up (read-only): no session yet, offer to start.
@@ -286,6 +292,7 @@ test('viewer fits its box at any chat size; the splitter resizes and persists', 
   await openApp(page)
   await addFixtureRoot(page)
   await selectDeck(page, 'acme-quarterly')
+  await page.getByRole('button', { name: /Deck chat/ }).click() // open the (default-collapsed) chat pane
 
   const fits = async () => {
     const box = await page.getByTestId('slide-fit').boundingBox()

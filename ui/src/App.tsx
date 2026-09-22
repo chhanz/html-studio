@@ -136,7 +136,7 @@ export default function HtmlStudio() {
   const [pdfError, setPdfError] = useState<string | null>(null)
 
   // P1-7: the deck's chat lives in the pane under the preview (DeckChat).
-  const [chatOpen, setChatOpen] = useCollapsed('chat', true)
+  const [chatOpen, setChatOpen] = useCollapsed('chat', false) // collapsed until wanted; the header says what it is
   // Preview / chat split: share of the right column given to the chat (persisted).
   const [chatRatio, setChatRatio] = useState<number>(() => {
     try {
