@@ -311,6 +311,31 @@ class PresentHelperTests(unittest.TestCase):
             finally:
                 p.stop()
 
+    def test_presenter_page_and_note_endpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            deck = Path(tmp) / "deck"
+            (deck / "slides").mkdir(parents=True)
+            (deck / "slides" / "010.html").write_text("<section class='slide'>a</section>")
+            (deck / "slides" / "020.html").write_text("<section class='slide'>b</section>")
+            (deck / "notes").mkdir()
+            (deck / "notes" / "020.md").write_text("- say this\n")
+            p = preview.DeckPreview(deck, "slides", None)
+            port = p.start()
+            try:
+                page = urllib.request.urlopen(f"http://127.0.0.1:{port}/presenter?lang=ko").read().decode()
+                self.assertIn('window.HS_PRESENTER={"count": 2, "slides": ["010.html", "020.html"]', page)
+                self.assertIn('"lang": "ko"', page)
+                self.assertIn("hs-present-", page)
+                n = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/note?slide=020.html").read())
+                self.assertEqual(n, {"slide": "020.html", "text": "- say this\n"})
+                n = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/note?slide=010.html").read())
+                self.assertEqual(n["text"], "")
+                with self.assertRaises(urllib.error.HTTPError) as ctx:
+                    urllib.request.urlopen(f"http://127.0.0.1:{port}/note?slide=../x")
+                ctx.exception.close()
+            finally:
+                p.stop()
+
     def test_helper_appended_without_body_tag(self) -> None:
         self.assertTrue(preview.inject_present_helper("<p>x</p>").endswith("</script>"))
 

@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Presenter</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; background: #0b0b0d; color: #e5e5e5; font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans KR", "Apple SD Gothic Neo", sans-serif; }
+  body { display: flex; flex-direction: column; }
+  header { display: flex; align-items: center; gap: 14px; padding: 8px 12px; border-bottom: 1px solid #222; flex: none; }
+  header .title { font-weight: 600; font-size: 14px; }
+  header .num { font-variant-numeric: tabular-nums; }
+  header .clock { color: #999; font-variant-numeric: tabular-nums; }
+  .presence { display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; color: #bbb; }
+  .presence i { width: 8px; height: 8px; border-radius: 50%; background: #666; display: inline-block; }
+  .presence.on i { background: #22c55e; }
+  header .sp { flex: 1; }
+  button { background: transparent; color: #ddd; border: 1px solid #555; border-radius: 6px; padding: 3px 9px; font: inherit; cursor: pointer; }
+  button:hover { border-color: #888; }
+  button[aria-pressed="true"] { background: #ddd; color: #111; }
+  button:disabled { opacity: .5; cursor: default; }
+  main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); grid-template-rows: minmax(0, 1fr) auto; gap: 12px; padding: 12px; }
+  .col { min-height: 0; display: flex; flex-direction: column; gap: 4px; }
+  .label { color: #999; font-size: 12px; display: flex; gap: 8px; align-items: center; }
+  .label .laser { color: #f87171; }
+  .fit { flex: 1; min-height: 0; position: relative; }
+  .fit.next { flex: 0 0 38%; }
+  .stage { position: absolute; left: 50%; top: 50%; transform-origin: center center; background: #fff; border-radius: 6px; overflow: hidden; }
+  .stage iframe { width: 1280px; height: 720px; border: 0; pointer-events: none; }
+  #cur .stage { cursor: crosshair; }
+  .notes { flex: 1; min-height: 0; overflow-y: auto; background: #151518; border-radius: 6px; padding: 12px 14px; font-size: 16px; line-height: 1.55; white-space: pre-wrap; margin-top: 6px; }
+  .notes.empty { color: #666; }
+  footer { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; color: #999; font-size: 12px; }
+  footer .num { color: #ddd; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<header>
+  <span class="title" data-i18n="title">Presenter</span>
+  <span class="num" id="timer">00:00</span>
+  <span class="clock" id="clock"></span>
+  <span class="presence" id="presence"><i></i><span data-i18n="audience_none">No audience window</span></span>
+  <span class="sp"></span>
+  <button id="black" aria-pressed="false" data-i18n="black">Black</button>
+</header>
+<main>
+  <section class="col" id="cur">
+    <div class="label"><span id="cur-label"></span><span id="cur-name"></span><span class="laser" id="laser-flag" hidden data-i18n="laser">laser</span></div>
+    <div class="fit" id="cur-fit"><div class="stage" id="cur-stage"><iframe id="cur-frame" title="current"></iframe></div></div>
+  </section>
+  <section class="col">
+    <div class="label" id="next-label"></div>
+    <div class="fit next" id="next-fit"><div class="stage" id="next-stage"><iframe id="next-frame" title="next"></iframe></div></div>
+    <div class="label" data-i18n="notes">Notes</div>
+    <div class="notes empty" id="notes"></div>
+  </section>
+  <footer>
+    <button id="prev" aria-label="previous">&#9666;</button>
+    <span class="num" id="pos"></span>
+    <button id="next" aria-label="next">&#9656;</button>
+    <span data-i18n="keys">Arrows: navigate. Move the mouse over the slide to point. Esc: close.</span>
+  </footer>
+</main>
+<script>
+(function () {
+  'use strict'
+  var CFG = window.HS_PRESENTER || { count: 0, slides: [], stage: { width: 1280, height: 720 }, lang: 'en' }
+  var W = CFG.stage.width, H = CFG.stage.height
+  var STRINGS = {
+    en: { title: 'Presenter', audience_none: 'Show not connected', audience_on: 'Show connected', black: 'Black', notes: 'Notes', laser: 'laser',
+          keys: 'Arrows: navigate. Move the mouse over the slide to point. Esc: close.', current: 'Slide {n} of {total}', next: 'Next: slide {n}', last: 'Last slide', no_notes: 'No notes for this slide.' },
+    ko: { title: '발표자', audience_none: '발표 화면 연결 안 됨', audience_on: '발표 화면 연결됨', black: '블랙', notes: '노트', laser: '레이저',
+          keys: '화살표: 이동. 슬라이드 위에서 마우스를 움직이면 레이저. Esc: 닫기.', current: '슬라이드 {n} / {total}', next: '다음: {n}번', last: '마지막 슬라이드', no_notes: '이 슬라이드에는 노트가 없습니다.' },
+  }
+  var S = STRINGS[(CFG.lang || 'en').slice(0, 2)] || STRINGS.en
+  function t(k, v) { var s = S[k] || k; if (v) for (var key in v) s = s.replace('{' + key + '}', v[key]); return s }
+  document.querySelectorAll('[data-i18n]').forEach(function (el) { el.textContent = t(el.getAttribute('data-i18n')) })
+  document.title = t('title')
+
+  var index = Math.max(0, Math.min(CFG.count - 1, (parseInt(location.hash.slice(1), 10) || 1) - 1))
+  var black = false
+  var channel = new BroadcastChannel('hs-present-' + location.port)
+  var STATE = '/present/state'
+  var inflight = 0
+  function post(obj) {
+    obj.from = 'presenter'
+    inflight++
+    return fetch(STATE, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(obj) })
+      .then(function (r) { return r.json() }).catch(function () { return null })
+      .then(function (st) { inflight--; return st })
+  }
+  function setBlackUI(on) { black = on; document.getElementById('black').setAttribute('aria-pressed', on ? 'true' : 'false') }
+  // Apply the shared state by VALUE (only differences from what we hold), never by
+  // sequence alone: our own writes may land between a GET and the state it reports.
+  function applyState(st) {
+    if (!st) return
+    if (st.audience) alive()
+    if (typeof st.index === 'number' && st.index !== index) { index = Math.max(0, Math.min(CFG.count - 1, st.index)); render() }
+    if (typeof st.black === 'boolean' && st.black !== black) setBlackUI(st.black)
+  }
+
+  // --- layout: scale the 1280x720 frames into their boxes ----------------------
+  function fit(boxId, stageId) {
+    var box = document.getElementById(boxId), stage = document.getElementById(stageId)
+    var r = box.getBoundingClientRect()
+    var s = Math.min(r.width / W, r.height / H)
+    stage.style.width = W + 'px'; stage.style.height = H + 'px'
+    stage.style.transform = 'translate(-50%, -50%) scale(' + s + ')'
+  }
+  function layout() { fit('cur-fit', 'cur-stage'); fit('next-fit', 'next-stage') }
+  addEventListener('resize', layout)
+
+  // --- render -------------------------------------------------------------------
+  var notesCache = {}
+  function render() {
+    var cur = document.getElementById('cur-frame'), nxt = document.getElementById('next-frame')
+    var want = '/slide/' + index
+    if (cur.getAttribute('src') !== want) cur.src = want
+    var hasNext = index + 1 < CFG.count
+    document.getElementById('next-stage').style.visibility = hasNext ? 'visible' : 'hidden'
+    if (hasNext && nxt.getAttribute('src') !== '/slide/' + (index + 1)) nxt.src = '/slide/' + (index + 1)
+    document.getElementById('cur-label').textContent = t('current', { n: index + 1, total: CFG.count })
+    document.getElementById('cur-name').textContent = CFG.slides[index] || ''
+    document.getElementById('next-label').textContent = hasNext ? t('next', { n: index + 2 }) : t('last')
+    document.getElementById('pos').textContent = (index + 1) + ' / ' + CFG.count
+    document.getElementById('prev').disabled = index <= 0
+    document.getElementById('next').disabled = index >= CFG.count - 1
+    var slide = CFG.slides[index]
+    var box = document.getElementById('notes')
+    function show(text) { box.textContent = text.trim() ? text : t('no_notes'); box.classList.toggle('empty', !text.trim()) }
+    if (slide in notesCache) show(notesCache[slide])
+    else fetch('/note?slide=' + encodeURIComponent(slide)).then(function (r) { return r.json() }).then(function (n) { notesCache[slide] = n.text || ''; if (CFG.slides[index] === slide) show(notesCache[slide]) }).catch(function () { show('') })
+    history.replaceState(null, '', '#' + (index + 1))
+    layout()
+  }
+  function go(n) {
+    var next = Math.max(0, Math.min(CFG.count - 1, n))
+    if (next === index) return
+    index = next
+    render()
+    channel.postMessage({ from: 'presenter', type: 'goto', index: index })
+    post({ index: index })
+  }
+  function setBlack(on) {
+    black = on
+    document.getElementById('black').setAttribute('aria-pressed', on ? 'true' : 'false')
+    channel.postMessage({ from: 'presenter', type: 'black', on: on })
+    post({ black: on })
+  }
+  document.getElementById('prev').onclick = function () { go(index - 1) }
+  document.getElementById('next').onclick = function () { go(index + 1) }
+  document.getElementById('black').onclick = function () { setBlack(!black) }
+  addEventListener('keydown', function (e) {
+    if (e.metaKey || e.ctrlKey || e.altKey) return
+    if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ' || e.key === 'Enter') go(index + 1)
+    else if (e.key === 'ArrowLeft' || e.key === 'PageUp' || e.key === 'Backspace') go(index - 1)
+    else if (e.key === 'Home') go(0)
+    else if (e.key === 'End') go(CFG.count - 1)
+    else if (e.key === 'Escape') { channel.postMessage({ from: 'presenter', type: 'bye' }); window.close() }
+    else return
+    e.preventDefault()
+  })
+
+  // --- laser: direct to the audience over the channel, throttled by frame -----
+  var pending = null, flag = document.getElementById('laser-flag')
+  var lastPost = 0
+  function flush() {
+    if (!pending) return
+    channel.postMessage({ from: 'presenter', type: 'laser', x: pending.x, y: pending.y, on: pending.on })
+    // The studio's own presentation view (another browser process) reads the laser from the state server.
+    var now = Date.now()
+    if (!pending.on || now - lastPost > 33) { lastPost = now; post({ laser: { on: pending.on, x: pending.x, y: pending.y } }) }
+    pending = null
+  }
+  document.getElementById('cur-fit').addEventListener('mousemove', function (e) {
+    var r = document.getElementById('cur-stage').getBoundingClientRect()
+    var x = (e.clientX - r.left) / r.width * W, y = (e.clientY - r.top) / r.height * H
+    var on = x >= 0 && y >= 0 && x <= W && y <= H
+    flag.hidden = !on
+    var first = !pending
+    pending = { x: Math.round(x), y: Math.round(y), on: on }
+    if (first) requestAnimationFrame(flush)
+  })
+  document.getElementById('cur-fit').addEventListener('mouseleave', function () {
+    flag.hidden = true
+    pending = { x: 0, y: 0, on: false }
+    flush()
+  })
+
+  // --- follow the audience (channel first, state as a fallback) ----------------
+  var presence = document.getElementById('presence'), seen = 0
+  function alive() { seen = Date.now(); presence.classList.add('on'); presence.lastElementChild.textContent = t('audience_on') }
+  channel.onmessage = function (e) {
+    var m = e.data || {}
+    if (m.from !== 'audience') return
+    if (m.type === 'hello' || m.type === 'pong') { alive(); channel.postMessage({ from: 'presenter', type: 'goto', index: index }); channel.postMessage({ from: 'presenter', type: 'black', on: black }) }
+    else if (m.type === 'slide' && typeof m.index === 'number') { alive(); if (m.index !== index) { index = Math.max(0, Math.min(CFG.count - 1, m.index)); render() } }
+    else if (m.type === 'black' && typeof m.on === 'boolean') { alive(); setBlackUI(m.on) }
+    else if (m.type === 'bye') { seen = 0 }
+  }
+  channel.postMessage({ from: 'presenter', type: 'ping' })
+  setInterval(function () {
+    if (inflight > 0) return
+    fetch(STATE).then(function (r) { return r.json() }).then(function (st) {
+      applyState(st)
+      if (Date.now() - seen > 6000) { presence.classList.remove('on'); presence.lastElementChild.textContent = t('audience_none') }
+    }).catch(function () {})
+  }, 250)
+  setInterval(function () {
+    channel.postMessage({ from: 'presenter', type: 'ping' })
+    post({})
+  }, 2000)
+
+  // --- timer / clock -----------------------------------------------------------
+  var started = Date.now()
+  function pad(n) { return String(n).padStart(2, '0') }
+  setInterval(function () {
+    var s = Math.floor((Date.now() - started) / 1000)
+    document.getElementById('timer').textContent = pad(Math.floor(s / 60)) + ':' + pad(s % 60)
+    document.getElementById('clock').textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  }, 1000)
+
+  render()
+  post({ index: index })
+})()
+</script>
+</body>
+</html>

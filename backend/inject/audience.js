@@ -11,7 +11,7 @@
 //
 // This script drives the deck's own runtime through the URL hash (every runtime
 // we know follows #N), paints the laser dot and the blackout, and adds two keys
-// for the projector machine: F = fullscreen, B = black screen.
+// for the projector machine: F = fullscreen.
 (function () {
   'use strict'
   var STAGE_W = 1280, STAGE_H = 720
@@ -55,20 +55,49 @@
     var s = Math.min(w / STAGE_W, h / STAGE_H)
     return { left: (w - STAGE_W * s) / 2, top: (h - STAGE_H * s) / 2, width: STAGE_W * s, height: STAGE_H * s }
   }
+  // Laser: the target moves in jumps (one message per pointer event); the dot
+  // eases toward it every frame, which reads as a smooth pointer.
+  var target = { on: false, x: 0, y: 0 }, cur = { x: 0, y: 0 }, animating = false
   function laser(l) {
-    if (!l || !l.on) {
+    target = { on: !!(l && l.on), x: l ? +l.x || 0 : 0, y: l ? +l.y || 0 : 0 }
+    if (!target.on) {
       dot.style.display = 'none'
       return
     }
+    if (dot.style.display !== 'block') {
+      cur = { x: target.x, y: target.y }
+      dot.style.display = 'block'
+    }
+    if (!animating) {
+      animating = true
+      requestAnimationFrame(step)
+    }
+  }
+  function step() {
+    if (!target.on) {
+      animating = false
+      return
+    }
+    cur.x += (target.x - cur.x) * 0.45
+    cur.y += (target.y - cur.y) * 0.45
     var b = stageBox()
-    dot.style.display = 'block'
-    dot.style.left = b.left + (l.x / STAGE_W) * b.width + 'px'
-    dot.style.top = b.top + (l.y / STAGE_H) * b.height + 'px'
+    dot.style.left = b.left + (cur.x / STAGE_W) * b.width + 'px'
+    dot.style.top = b.top + (cur.y / STAGE_H) * b.height + 'px'
+    if (Math.abs(target.x - cur.x) + Math.abs(target.y - cur.y) < 0.3) {
+      animating = false
+      return
+    }
+    requestAnimationFrame(step)
   }
 
   // --- follow the presenter --------------------------------------------------
+  // Fast path: a presenter window on the same browser talks over BroadcastChannel
+  // (no latency, needed for the laser). Fallback: the shared state on the preview
+  // server, for a presenter in another browser process (the dashboard).
   var applied = -1 // last seq applied
   var lastOwn = currentIndex()
+  var channelAt = 0
+  function setBlack(on) { black.style.display = on ? 'block' : 'none' }
   function apply(st) {
     if (!st) return
     if (st.seq !== applied) {
@@ -77,14 +106,25 @@
         lastOwn = st.index
         goto(st.index)
       }
-      black.style.display = st.black ? 'block' : 'none'
+      setBlack(!!st.black)
     }
-    laser(st.laser)
+    if (Date.now() - channelAt > 1500) laser(st.laser) // channel owns the laser while it is alive
   }
+  var channel = new BroadcastChannel('hs-present-' + location.port)
+  channel.onmessage = function (e) {
+    var m = e.data || {}
+    if (m.from !== 'presenter') return
+    channelAt = Date.now()
+    if (m.type === 'goto' && typeof m.index === 'number') { lastOwn = m.index; goto(m.index) }
+    else if (m.type === 'laser') laser(m)
+    else if (m.type === 'black') setBlack(!!m.on)
+    else if (m.type === 'ping') channel.postMessage({ from: 'audience', type: 'pong', index: currentIndex() })
+  }
+  channel.postMessage({ from: 'audience', type: 'hello', index: currentIndex() })
   function poll() {
     fetch(STATE).then(function (r) { return r.json() }).then(apply).catch(function () {})
   }
-  setInterval(poll, 120)
+  setInterval(poll, 250)
   poll()
 
   // Own navigation (clicker on this machine): runtimes tend to change the hash
@@ -93,6 +133,7 @@
     var i = currentIndex()
     if (i === lastOwn) return
     lastOwn = i
+    channel.postMessage({ from: 'audience', type: 'slide', index: i })
     post({ index: i }).then(apply)
   }
   addEventListener('hashchange', report)
@@ -100,18 +141,13 @@
   setInterval(function () { post({}) }, 2000) // heartbeat for the presence indicator
   post({ index: currentIndex() })
 
-  // Projector-side keys.
+  // Projector-side key: F toggles fullscreen (the deck's own runtime may do the same; harmless twice).
   addEventListener('keydown', function (e) {
     if (e.metaKey || e.ctrlKey || e.altKey) return
     if (e.key === 'f' || e.key === 'F') {
-      e.preventDefault()
       if (document.fullscreenElement) document.exitFullscreen && document.exitFullscreen()
       else if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(function () {})
-    } else if (e.key === 'b' || e.key === 'B') {
-      e.preventDefault()
-      var on = black.style.display !== 'block'
-      black.style.display = on ? 'block' : 'none'
-      post({ black: on }).then(apply)
     }
   }, true)
+  addEventListener('beforeunload', function () { channel.postMessage({ from: 'audience', type: 'bye' }) })
 })()

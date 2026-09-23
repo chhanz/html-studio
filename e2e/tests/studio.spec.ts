@@ -646,75 +646,67 @@ test('speaker notes: autosaves notes/<slide>.md, marks the thumbnail, survives r
   await expect(page.locator('#slides-body li').nth(0).getByTestId('strip-note')).toHaveCount(0)
 })
 
-test('presenter view: notes, next slide, timer; drives and follows an audience window in ANOTHER browser; laser and black', async ({ page, browser }) => {
+test('present opens the presenter window in ANOTHER browser and stays in sync: slides, laser, black', async ({ page, browser }) => {
   await openApp(page)
   await addFixtureRoot(page)
   await selectDeck(page, 'acme-quarterly')
   const home = await fakeHome(page)
   const deckPath = `${home}/decks/acme-quarterly`
-  // Prepare: a note on slide 2, and a build so the audience window exists.
   await page.request.post('/apps/html-studio/api/note', { data: { path: deckPath, slide: '020_agenda.html', text: '- Three items\n- Keep it short' } })
   await page.getByRole('button', { name: /^Build$/ }).click()
   await expect(page.getByRole('status').filter({ hasText: /Build succeeded/ })).toBeVisible()
   await page.getByRole('group', { name: /^View$/ }).getByRole('button', { name: /^Slides$/ }).click()
 
-  await page.getByRole('button', { name: /^Presenter view$/ }).click()
-  const view = page.getByTestId('presenter-view')
-  await expect(view).toHaveAttribute('data-slide', '1')
-  await expect(view).toHaveAttribute('data-audience', 'none')
-  await expect(page.getByTestId('presenter-notes')).toContainText('No notes for this slide')
-  await expect(view).toContainText('Next: slide 2')
-  await expect(page.getByTestId('presenter-timer')).toHaveText(/^00:0\d$/)
-
-  // "Audience window" asks the backend for the URL (no browser launch in tests); open it ourselves.
-  const audienceUrl = (await (await page.request.post('/apps/html-studio/api/present', { data: { path: deckPath, slide: 1, mode: 'audience' } })).json()).url as string
-  expect(audienceUrl).toMatch(/\/out\/index\.html\?hs=audience#1$/)
-  // A separate browser context: no shared storage, cookies or BroadcastChannel,
-  // like the real system browser next to the dashboard.
+  // Present: the show opens here; the presenter window is requested from the backend
+  // (no browser launch in tests, so we open its URL ourselves in a separate browser context).
+  await page.getByRole('button', { name: /^Present$/ }).click()
+  const dialog = page.getByRole('dialog', { name: /Presentation/ })
+  await expect(dialog).toBeVisible()
+  const frame = page.frameLocator('iframe[title="Presentation"]')
+  await expect(frame.locator('#hs-counter')).toHaveText('1 / 4')
+  await expect(page.getByTestId('present-presenter')).toHaveAttribute('data-on', 'false')
+  const presenterUrl = (await (await page.request.post('/apps/html-studio/api/present', { data: { path: deckPath, slide: 1, mode: 'presenter', language: 'en' } })).json()).url as string
+  expect(presenterUrl).toMatch(/\/presenter\?lang=en#1$/)
   const other = await browser.newContext()
-  const audience = await other.newPage()
-  await audience.goto(audienceUrl)
-  await expect(audience.locator('#hs-counter')).toHaveText('1 / 4')
-  await expect(view).toHaveAttribute('data-audience', 'connected')
+  const presenter = await other.newPage()
+  await presenter.goto(presenterUrl)
+  await expect(presenter.locator('#cur-label')).toHaveText('Slide 1 of 4')
+  await expect(presenter.locator('#notes')).toHaveText('No notes for this slide.')
+  await expect(page.getByTestId('present-presenter')).toHaveAttribute('data-on', 'true')
 
-  // Presenter navigates: notes and next slide update, the audience follows.
+  // Presenter navigates: the show follows; notes and next slide update in the presenter.
+  await presenter.keyboard.press('ArrowRight')
+  await expect(presenter.locator('#cur-label')).toHaveText('Slide 2 of 4')
+  await expect(presenter.locator('#notes')).toContainText('Keep it short')
+  await expect(presenter.locator('#next-label')).toHaveText('Next: slide 3')
+  await expect(frame.locator('#hs-counter')).toHaveText('2 / 4')
+
+  // The show navigates (clicker on the presenting machine): the presenter follows.
   await page.keyboard.press('ArrowRight')
-  await expect(view).toHaveAttribute('data-slide', '2')
-  await expect(page.getByTestId('presenter-notes')).toContainText('Keep it short')
-  await expect(view).toContainText('Next: slide 3')
-  await expect(audience.locator('#hs-counter')).toHaveText('2 / 4')
+  await expect(frame.locator('#hs-counter')).toHaveText('3 / 4')
+  await expect(presenter.locator('#cur-label')).toHaveText('Slide 3 of 4')
 
-  // Audience navigates on its own (clicker on the projector machine): the presenter follows.
-  await audience.locator('body').click()
-  await audience.keyboard.press('ArrowRight')
-  await expect(audience.locator('#hs-counter')).toHaveText('3 / 4')
-  await expect(view).toHaveAttribute('data-slide', '3')
-
-  // Laser: pointer over the presenter's current slide lights the dot in the audience window.
-  const stage = page.getByTestId('presenter-current').getByTestId('slide-stage')
+  // Laser: pointer over the presenter's current slide lights the dot in the show.
+  const stage = presenter.locator('#cur-stage')
   const box = (await stage.boundingBox())!
-  await page.mouse.move(box.x + box.width * 0.25, box.y + box.height * 0.5)
-  await expect(view).toContainText('laser')
-  const dot = audience.locator('#hs-laser')
+  await presenter.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.5)
+  await presenter.mouse.move(box.x + box.width * 0.31, box.y + box.height * 0.5)
+  const dot = page.getByTestId('present-laser')
   await expect(dot).toBeVisible()
-  await page.mouse.move(5, 5) // off the slide
+  await presenter.mouse.move(2, 2)
   await expect(dot).toBeHidden()
 
-  // Black screen: from the presenter (B) and from the audience window itself (B), both ways.
-  const black = audience.locator('#hs-black')
-  await page.keyboard.press('b')
-  await expect(black).toBeVisible()
-  await page.keyboard.press('b')
-  await expect(black).toBeHidden()
-  await audience.keyboard.press('b')
-  await expect(black).toBeVisible()
-  await expect(page.getByRole('button', { name: /^Black$/ })).toHaveAttribute('aria-pressed', 'true')
-  await audience.keyboard.press('b')
-  await expect(black).toBeHidden()
+  // Black both ways.
+  await presenter.locator('#black').click()
+  await expect(page.getByTestId('present-black')).toBeVisible()
+  await page.mouse.move(400, 300) // the control bar auto-hides; a pointer move brings it back
+  await page.getByRole('button', { name: /^Black$/ }).click({ force: true })
+  await expect(page.getByTestId('present-black')).toHaveCount(0)
+  await expect(presenter.locator('#black')).toHaveAttribute('aria-pressed', 'false')
 
-  // Esc closes the presenter and the studio lands on the slide we ended on.
+  // Esc ends the show; the studio lands on the slide we ended on.
   await page.keyboard.press('Escape')
-  await expect(view).toHaveCount(0)
+  await expect(dialog).toHaveCount(0)
   await expect(page.getByText('3 / 4')).toBeVisible()
   await other.close()
 })

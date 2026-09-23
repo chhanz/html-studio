@@ -10,6 +10,9 @@ Routes (all GET):
   /slide/<index>             one slide fragment wrapped into a full page (?hs=select adds the overlay)
   /print                     every slide as one 1280x720 page (PDF export)
   /check                     measures every slide (deck check, headless)
+  /presenter?lang=           the presenter window (notes, next slide, timer, laser)
+  /present/state             shared presenter state (GET/POST, loopback CORS)
+  /note?slide=               speaker note text for the presenter window
   /assets/<path>, /img/<path>, /out/<path>
                              static files from the deck folder (contained)
 
@@ -28,6 +31,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
+
+import notes as notes_lib
 
 STAGE_W, STAGE_H = 1280, 720
 _STATIC_PREFIXES = ("assets", "img", "out")
@@ -376,6 +381,14 @@ class DeckPreview:
         fragment = files[index].read_text(encoding="utf-8", errors="replace")
         return wrap_slide(fragment, css_href=self._css_href(), title=files[index].name, page_number=index + 1)
 
+    def presenter_page(self, lang: str = "en") -> str:
+        """The presenter window (inject/presenter.html) configured for this deck."""
+        cfg = json.dumps({"count": self.slide_count(), "slides": self.slide_names(), "stage": {"width": STAGE_W, "height": STAGE_H}, "lang": lang})
+        page = (_INJECT_DIR / "presenter.html").read_text(encoding="utf-8")
+        marker = "<script>\n(function () {"
+        config_tag = "<script>window.HS_PRESENTER=" + cfg + "</script>\n"
+        return page.replace(marker, config_tag + marker, 1)
+
     def render_print(self) -> str:
         """One document with every slide laid out as a 1280x720 page, for PDF export.
 
@@ -451,6 +464,15 @@ class DeckPreview:
         path = url.path
         if path == "/present/state":
             return _send(h, 200, json.dumps(self.present.snapshot()).encode("utf-8"), "application/json", cors=_cors_origin(h))
+        if path == "/presenter":
+            lang = parse_qs(url.query).get("lang", ["en"])[0][:5]
+            return _send(h, 200, self.presenter_page(lang).encode("utf-8"), "text/html; charset=utf-8")
+        if path == "/note":
+            slide = parse_qs(url.query).get("slide", [""])[0]
+            names = self.slide_names()
+            if slide not in names:
+                return _send(h, 404, b'{"error":"unknown_slide"}', "application/json")
+            return _send(h, 200, json.dumps({"slide": slide, "text": notes_lib.read_note(self.deck_dir, slide)}).encode("utf-8"), "application/json")
         if path == "/health":
             return _send(h, 200, b'{"status":"ok"}', "application/json")
         if path == "/check":

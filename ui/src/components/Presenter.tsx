@@ -7,11 +7,19 @@ type Props = {
   t: T
   /** Built output URL (served by the deck's preview server). */
   url: string
+  /** Preview server base (the shared presenter state lives there). */
+  baseUrl: string
   /** 1-based slide to start from. */
   startSlide: number
   slideCount: number
   onClose: () => void
+  /** Open the presenter window (system browser) at a 1-based slide. */
+  openPresenter?: (slide: number) => Promise<void>
+  /** Called when the show ends with the slide it ended on (1-based). */
+  onPosition?: (slide: number) => void
 }
+
+type PresentStateWire = { seq: number; index: number; black: boolean; laser: { on: boolean; x: number; y: number }; presenter: boolean; audience: boolean }
 
 type Zoom = { kind: 'img'; src: string; alt: string } | { kind: 'svg'; svg: string }
 
@@ -31,10 +39,41 @@ type Zoom = { kind: 'img'; src: string; alt: string } | { kind: 'svg'; svg: stri
  *    fullscreen best-effort. The shell can lower the window without firing
  *    fullscreenchange, so a watchdog compares the viewport with the screen.
  */
-export function Presenter({ t, url, startSlide, slideCount, onClose }: Props) {
+export function Presenter({ t, url, baseUrl, startSlide, slideCount, onClose, openPresenter, onPosition }: Props) {
   const rootRef = useRef<HTMLDivElement>(null)
   const frameRef = useRef<HTMLIFrameElement>(null)
   const [current, setCurrent] = useState(startSlide)
+  const currentRef = useRef(current)
+  currentRef.current = current
+  // Presenter window sync (P3-6): the presenter window is a system-browser page
+  // on the preview server; this fullscreen show is the audience screen. Both
+  // meet at the server's /present/state (another browser process cannot be
+  // reached any other way from the dashboard).
+  const stateUrl = `${baseUrl}/present/state`
+  const seqRef = useRef(-1)
+  const [black, setBlack] = useState(false)
+  const blackRef = useRef(black)
+  blackRef.current = black
+  const [presenterOn, setPresenterOn] = useState(false)
+  const laserTarget = useRef({ on: false, x: 0, y: 0 })
+  const laserDot = useRef<HTMLDivElement>(null)
+  const stageBoxRef = useRef<HTMLDivElement>(null)
+  const inflight = useRef(0) // polls are skipped while our own writes are in flight
+  const post = useCallback(
+    (body: Record<string, unknown>) => {
+      inflight.current += 1
+      void fetch(stateUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: 'audience', ...body }) })
+        .then((r) => r.json())
+        .then((st: PresentStateWire) => {
+          seqRef.current = st.seq
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          inflight.current -= 1
+        })
+    },
+    [stateUrl],
+  )
   const [fullscreen, setFullscreen] = useState(false)
   const [chrome, setChrome] = useState(true)
   const [zoom, setZoom] = useState<Zoom | null>(null)
@@ -65,7 +104,7 @@ export function Presenter({ t, url, startSlide, slideCount, onClose }: Props) {
     else void req()
   }, [])
 
-  const post = useCallback((msg: Record<string, unknown>) => {
+  const postFrame = useCallback((msg: Record<string, unknown>) => {
     frameRef.current?.contentWindow?.postMessage(msg, '*')
   }, [])
 
@@ -73,14 +112,15 @@ export function Presenter({ t, url, startSlide, slideCount, onClose }: Props) {
     (index1: number) => {
       const n = Math.max(1, Math.min(slideCount || index1, index1))
       setCurrent(n)
-      post({ type: 'hs-go', index: n - 1 })
+      post({ index: n - 1 })
+      postFrame({ type: 'hs-go', index: n - 1 })
       // External runtimes usually follow the hash; a src change that only
       // differs in the fragment is a fragment navigation, not a reload — so it
       // must be the same presenter URL (with the helper query) as the initial load.
       const f = frameRef.current
       if (f) f.src = `${frameUrl}#${n}`
     },
-    [post, slideCount, frameUrl],
+    [post, postFrame, slideCount, frameUrl],
   )
 
   // F: none. Esc is the single exit (fullscreen and presentation are one thing).
@@ -90,8 +130,82 @@ export function Presenter({ t, url, startSlide, slideCount, onClose }: Props) {
     const f = frameRef.current
     if (!f) return
     const r = f.getBoundingClientRect()
-    post({ type: 'hs-hit', x: e.clientX - r.left, y: e.clientY - r.top })
-  }, [post])
+    postFrame({ type: 'hs-hit', x: e.clientX - r.left, y: e.clientY - r.top })
+  }, [postFrame])
+
+  // Presenter window + state sync.
+  useEffect(() => {
+    let alive = true
+    let raf = 0
+    let ready = false
+    // Seed the shared state with OUR slide first (awaited), so the first poll
+    // does not drag us to whatever the server remembered from a previous show.
+    void fetch(stateUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: 'audience', index: startSlide - 1, black: false, laser: { on: false, x: 0, y: 0 } }) })
+      .then((r) => r.json())
+      .then((st: PresentStateWire) => {
+        seqRef.current = st.seq
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        ready = true
+      })
+    void openPresenter?.(startSlide)
+    const cur = { x: 0, y: 0 }
+    const step = () => {
+      raf = 0
+      const dot = laserDot.current
+      const box = stageBoxRef.current
+      const tgt = laserTarget.current
+      if (!dot || !box) return
+      if (!tgt.on) {
+        dot.style.display = 'none'
+        return
+      }
+      cur.x += (tgt.x - cur.x) * 0.45
+      cur.y += (tgt.y - cur.y) * 0.45
+      const r = box.getBoundingClientRect()
+      dot.style.display = 'block'
+      dot.style.left = `${(cur.x / 1280) * r.width}px`
+      dot.style.top = `${(cur.y / 720) * r.height}px`
+      if (Math.abs(tgt.x - cur.x) + Math.abs(tgt.y - cur.y) > 0.3) raf = requestAnimationFrame(step)
+    }
+    const tick = async () => {
+      if (!ready || inflight.current > 0) return
+      try {
+        const st = (await (await fetch(stateUrl)).json()) as PresentStateWire
+        if (!alive) return
+        setPresenterOn(st.presenter)
+        if (st.seq === seqRef.current) return
+        seqRef.current = st.seq
+        // Apply by value, not by sequence: a write of ours may have landed between
+        // this GET and the state it reports, so only differences from what we
+        // hold locally are taken (the presenter window does the same).
+        if (typeof st.index === 'number' && st.index + 1 !== currentRef.current) {
+          const n = st.index + 1
+          setCurrent(n)
+          postFrame({ type: 'hs-go', index: st.index })
+          const f = frameRef.current
+          if (f) f.src = `${frameUrl}#${n}`
+        }
+        if (typeof st.black === 'boolean' && st.black !== blackRef.current) setBlack(st.black)
+        const l = st.laser || { on: false, x: 0, y: 0 }
+        if (!laserTarget.current.on && l.on) Object.assign(cur, { x: l.x, y: l.y })
+        laserTarget.current = { on: !!l.on, x: l.x, y: l.y }
+        if (!raf) raf = requestAnimationFrame(step)
+      } catch {
+        /* preview restarting: keep trying */
+      }
+    }
+    void tick()
+    const id = setInterval(tick, 100)
+    return () => {
+      alive = false
+      clearInterval(id)
+      if (raf) cancelAnimationFrame(raf)
+      onPosition?.(currentRef.current)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     rootRef.current?.focus()
@@ -184,14 +298,24 @@ export function Presenter({ t, url, startSlide, slideCount, onClose }: Props) {
       className="fixed inset-0 flex flex-col outline-none"
       style={{ zIndex: 1000, background: '#000', cursor: chrome ? 'default' : 'none' }}
     >
-      <iframe
-        ref={frameRef}
-        src={`${frameUrl}#${startSlide}`}
-        title={t('present.title')}
-        sandbox="allow-scripts allow-same-origin"
-        tabIndex={-1}
-        className="flex-1 w-full h-full border-0"
-      />
+      <div ref={stageBoxRef} className="flex-1 w-full h-full relative min-h-0">
+        <iframe
+          ref={frameRef}
+          src={`${frameUrl}#${startSlide}`}
+          title={t('present.title')}
+          sandbox="allow-scripts allow-same-origin"
+          tabIndex={-1}
+          className="absolute inset-0 w-full h-full border-0"
+        />
+        {/* Laser dot driven by the presenter window (eased toward the last reported point). */}
+        <div
+          ref={laserDot}
+          data-testid="present-laser"
+          className="absolute rounded-full pointer-events-none"
+          style={{ display: 'none', width: 18, height: 18, marginLeft: -9, marginTop: -9, background: 'rgba(255,40,40,.95)', boxShadow: '0 0 12px 4px rgba(255,40,40,.55)', zIndex: 5 }}
+        />
+        {black && <div data-testid="present-black" className="absolute inset-0" style={{ background: '#000', zIndex: 6 }} />}
+      </div>
       {/* Click shield: keeps focus here; a click is hit-tested in the deck
           (image → lightbox). Clicks never navigate. */}
       <div data-testid="present-shield" className="absolute inset-0" onClick={hitTest} />
@@ -213,13 +337,35 @@ export function Presenter({ t, url, startSlide, slideCount, onClose }: Props) {
       )}
       <div
         className="absolute left-0 right-0 bottom-0 flex items-center gap-2 px-3 py-2 text-[12px] transition-opacity"
-        style={{ background: 'rgba(0,0,0,.6)', color: '#ddd', opacity: chrome ? 1 : 0 }}
+        style={{ background: 'rgba(0,0,0,.6)', color: '#ddd', opacity: chrome ? 1 : 0, zIndex: 10 }}
       >
         <SmallBtn onClick={() => go(current - 1)} disabled={current <= 1} aria-label={t('viewer.prev')} style={btn}>◂</SmallBtn>
         <span className="tabular-nums">{current} / {slideCount}</span>
         <SmallBtn onClick={() => go(current + 1)} disabled={current >= slideCount} aria-label={t('viewer.next')} style={btn}>▸</SmallBtn>
         <span className="ml-3 text-[11px]" style={{ color: '#999' }}>{t('present.keys')}</span>
+        <span className="ml-3 inline-flex items-center gap-1 text-[11px]" data-testid="present-presenter" data-on={presenterOn ? 'true' : 'false'} style={{ color: presenterOn ? '#4ade80' : '#999' }}>
+          <span aria-hidden className="inline-block rounded-full" style={{ width: 7, height: 7, background: presenterOn ? '#22c55e' : '#666' }} />
+          {presenterOn ? t('present.presenter_on') : t('present.presenter_off')}
+        </span>
         <span className="ml-auto flex gap-1">
+          {openPresenter && (
+            <SmallBtn onClick={() => void openPresenter(current)} style={btn} title={t('present.presenter_hint')}>
+              {t('present.presenter_window')} ↗
+            </SmallBtn>
+          )}
+          <SmallBtn
+            onClick={() => {
+              setBlack((v) => {
+                post({ black: !v })
+                return !v
+              })
+            }}
+            active={black}
+            aria-pressed={black}
+            style={btn}
+          >
+            {t('presenter.black')}
+          </SmallBtn>
           {!fullscreen && <SmallBtn onClick={enterFullscreen} style={btn}>{t('present.fullscreen')}</SmallBtn>}
           <SmallBtn onClick={close} style={btn}>{t('present.close')}</SmallBtn>
         </span>
