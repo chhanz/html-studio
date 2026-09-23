@@ -60,8 +60,9 @@ Slides are a 1280x720 stage. Slide text avoids em/en dashes and middle dots (the
 HTML Studio is a Kiro Crew app. From a checkout:
 
 ```bash
-cd ui && npm install && npm run build      # produces ui/dist/index.mjs
-kirocrew app install /path/to/html-studio
+git clone https://github.com/chhanz/html-studio.git
+cd html-studio/ui && npm install && npm run build && cd ..   # produces ui/dist/index.mjs
+kirocrew app install "$PWD"
 kirocrew app enable html-studio
 ```
 

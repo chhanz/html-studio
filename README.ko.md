@@ -60,8 +60,9 @@ HTML Studio는 덱에 프레임워크를 얹지 않습니다. 선택적인 파�
 HTML Studio는 Kiro Crew 앱입니다. 체크아웃에서:
 
 ```bash
-cd ui && npm install && npm run build      # ui/dist/index.mjs 생성
-kirocrew app install /path/to/html-studio
+git clone https://github.com/chhanz/html-studio.git
+cd html-studio/ui && npm install && npm run build && cd ..   # ui/dist/index.mjs 생성
+kirocrew app install "$PWD"
 kirocrew app enable html-studio
 ```
 
