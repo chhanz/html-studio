@@ -15,7 +15,9 @@
     "visual-editing"
   ],
   "agents": [],
-  "skills": [],
+  "skills": [
+    "skills/deck-visual-edit"
+  ],
   "ui": {
     "entry": "dist/index.mjs",
     "pages": [
