@@ -185,6 +185,9 @@ const server = createServer(async (req, res) => {
       mkdirSync(crewHome, { recursive: true })
       chatSlots.clear()
       chatLog.length = 0
+      // Fresh fixtures too: a test may write into a deck (tokens.css).
+      rmSync(join(fakeHome, 'decks'), { recursive: true, force: true })
+      cpSync(join(here, 'fixtures', 'decks'), join(fakeHome, 'decks'), { recursive: true })
       await startBackend()
       res.writeHead(200)
       return res.end('reset')

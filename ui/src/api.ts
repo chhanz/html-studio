@@ -115,7 +115,26 @@ export function makeClient(api: AppApi) {
     pdfStart: (path: string) => wrap(api.post<PdfJob>(`${API}/pdf`, { path })),
     pdfStatus: (id: string) => wrap(api.get<PdfJob>(`${API}/pdf?id=${encodeURIComponent(id)}`)),
     reveal: (path: string, file: string) => wrap(api.post<{ revealed: string }>(`${API}/reveal`, { path, file })),
+    design: (path: string) => wrap(api.get<DesignInfo>(`${API}/design?path=${encodeURIComponent(path)}`)),
+    writeTokens: (path: string) => wrap(api.post<DesignInfo>(`${API}/design/tokens`, { path })),
   }
+}
+
+export type DesignInfo = {
+  present: boolean
+  design: {
+    name: string | null
+    colors: Record<string, string>
+    typography: Record<string, { size: string | null; weight: string | null; lineHeight: string | null; letterSpacing: string | null }>
+    spacing: Record<string, string>
+    rounded: Record<string, string>
+    font: { family: string | null; fallback: string | null }
+  } | null
+  empty: boolean
+  tokens: string
+  tokensExists: boolean
+  tokensStale: boolean
+  css: string | null
 }
 
 export type Client = ReturnType<typeof makeClient>

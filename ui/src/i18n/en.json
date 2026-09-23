@@ -98,5 +98,15 @@
   "chat.open_full_hint": "Open this session on the Chat page",
   "chat.placeholder": "Ask for a change to {name}…",
   "split.label": "Resize preview and chat",
-  "chat.tagline": "ask the agent to change this deck; it works inside the deck folder"
+  "chat.tagline": "ask the agent to change this deck; it works inside the deck folder",
+  "theme.colors": "Theme colours",
+  "theme.empty": "DESIGN.md has no tokens the studio understands",
+  "theme.tokens.missing": "tokens.css not generated",
+  "theme.tokens.stale": "tokens.css is out of date",
+  "theme.tokens.fresh": "tokens.css up to date",
+  "theme.tokens.write": "Generate tokens.css",
+  "theme.tokens.update": "Update tokens.css",
+  "theme.tokens.hint": "Write CSS variables from DESIGN.md into the deck folder; the preview uses them right away",
+  "theme.tokens.own_css_hint": "This deck styles itself with {css}; tokens.css is written next to it for that stylesheet to import",
+  "viewer.tokens_theme": "Built-in theme + tokens.css"
 }

@@ -334,3 +334,34 @@ test('viewer fits its box at any chat size; the splitter resizes and persists', 
   const full = await fits()
   expect(full.height).toBeGreaterThan(after.height)
 })
+
+test('DESIGN.md: theme row shows the design, tokens.css is written on demand and restyles the preview', async ({ page }) => {
+  await openApp(page)
+  await addFixtureRoot(page)
+  await expect(page.getByRole('option', { name: /acme-quarterly/ })).toContainText('DESIGN.md')
+  await selectDeck(page, 'acme-quarterly')
+
+  const row = page.getByTestId('theme-row')
+  await expect(row).toBeVisible()
+  await expect(row).toContainText('Acme Lab')
+  await expect(row).toContainText('AcmeSans')
+  await expect(row).toHaveAttribute('data-tokens', 'missing')
+  const primary = row.locator('[data-testid="theme-swatch"][data-name="primary"]')
+  await expect(primary).toHaveAttribute('title', 'primary #0f766e')
+
+  // Before: default theme accent.
+  const frame = page.frameLocator('iframe[title="010_cover.html"]').first()
+  const accent = () => frame.locator('html').evaluate((el) => getComputedStyle(el).getPropertyValue('--hs-accent').trim())
+  expect(await accent()).toBe('#6d5efc')
+  await expect(page.getByText(/^Built-in theme$/)).toBeVisible()
+
+  await page.getByRole('button', { name: /^Generate tokens\.css$/ }).click()
+  await expect(row).toHaveAttribute('data-tokens', 'fresh')
+  await expect(page.getByText(/^Built-in theme \+ tokens\.css$/)).toBeVisible()
+  // After: the preview server serves tokens.css and the slide picks up the DESIGN.md primary.
+  const home = await fakeHome(page)
+  await expect.poll(accent).toBe('#0f766e')
+  const css = await (await page.request.get(`/apps/html-studio/api/design?path=${encodeURIComponent(`${home}/decks/acme-quarterly`)}`)).json()
+  expect(css.tokensExists).toBe(true)
+  expect(css.css).toBe('tokens.css')
+})

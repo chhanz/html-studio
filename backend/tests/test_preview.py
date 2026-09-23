@@ -193,6 +193,34 @@ class PrintDocumentTests(unittest.TestCase):
                 p.stop()
 
 
+class RootStylesheetTests(unittest.TestCase):
+    def test_root_level_stylesheet_is_served_and_overlays_default_theme(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            deck = Path(tmp) / "deck"
+            (deck / "slides").mkdir(parents=True)
+            (deck / "slides" / "010.html").write_text("<section class='slide'>x</section>")
+            (deck / "tokens.css").write_text(":root{--hs-accent:#0f766e}")
+            p = preview.DeckPreview(deck, "slides", "tokens.css")
+            port = p.start()
+            try:
+                with urllib.request.urlopen(f"http://127.0.0.1:{port}/tokens.css") as r:
+                    self.assertEqual(r.status, 200)
+                page = urllib.request.urlopen(f"http://127.0.0.1:{port}/slide/0").read().decode()
+                self.assertIn("--hs-accent:#6d5efc", page)  # default theme kept (tokens are an overlay)
+                self.assertLess(page.index("--hs-accent:#6d5efc"), page.index('href="/tokens.css"'))
+                with self.assertRaises(urllib.error.HTTPError) as ctx:
+                    urllib.request.urlopen(f"http://127.0.0.1:{port}/DESIGN.md")
+                ctx.exception.close()
+            finally:
+                p.stop()
+            reg = preview.PreviewRegistry()
+            a = reg.ensure(deck, "slides", "tokens.css")
+            self.assertIs(reg.ensure(deck, "slides", "tokens.css"), a)  # same css: reused
+            b = reg.ensure(deck, "slides", None)
+            self.assertIsNot(b, a)  # css changed: restarted
+            reg.stop_all()
+
+
 class PresentHelperTests(unittest.TestCase):
     def test_helper_injected_only_with_present_query(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -32,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import decks as deck_lib  # noqa: E402
 import preview as preview_lib  # noqa: E402
 import build as build_lib  # noqa: E402
+import design as design_lib  # noqa: E402
 import export as export_lib  # noqa: E402
 
 PDF_JOBS = export_lib.ExportJobs()
@@ -39,7 +40,7 @@ PDF_JOBS = export_lib.ExportJobs()
 PREVIEWS = preview_lib.PreviewRegistry()
 
 APP_NAME = os.environ.get("KIROCREW_APP_NAME", "html-studio")
-APP_VERSION = "0.1.11"
+APP_VERSION = "0.1.12"
 PORT = int(os.environ.get("PORT", "9100"))
 HOME = Path(os.environ.get("KIROCREW_HOME", str(Path.home() / ".kiro" / "crew")))
 DATA_DIR = HOME / "apps" / APP_NAME / "data"
@@ -317,6 +318,57 @@ def route_build(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
     return 200, result
 
 
+# --- design (DESIGN.md → tokens.css) ---------------------------------------
+def _design_payload(deck: Path) -> dict[str, Any]:
+    d = design_lib.read_design(deck)
+    tokens = deck / design_lib.TOKENS_FILE
+    stale = False
+    if d is not None and tokens.is_file():
+        try:
+            stale = tokens.read_text(encoding="utf-8") != design_lib.tokens_css(d)
+        except OSError:
+            stale = True
+    return {
+        "present": d is not None,
+        "design": d.as_dict() if d is not None else None,
+        "empty": d.empty if d is not None else True,
+        "tokens": design_lib.TOKENS_FILE,
+        "tokensExists": tokens.is_file(),
+        "tokensStale": stale,
+        "css": _deck_css(deck),
+    }
+
+
+def route_design(h: "Handler", _body: dict[str, Any]) -> tuple[int, Any]:
+    """GET /design?path=<deck>: parsed DESIGN.md (if any) and tokens.css state."""
+    deck = _deck_under_roots(parse_qs(urlsplit(h.path).query).get("path", [""])[0])
+    if deck is None:
+        return 400, {"error": "deck_not_allowed"}
+    return 200, _design_payload(deck)
+
+
+def route_design_tokens(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
+    """POST /design/tokens {path}: write <deck>/tokens.css from DESIGN.md (explicit user action)."""
+    deck = _deck_under_roots(str(body.get("path", "")))
+    if deck is None:
+        return 400, {"error": "deck_not_allowed"}
+    d = design_lib.read_design(deck)
+    if d is None:
+        return 409, {"error": "no_design_md"}
+    if d.empty:
+        return 409, {"error": "design_md_empty"}
+    try:
+        design_lib.write_tokens(deck, d)
+    except OSError as exc:
+        return 500, {"error": "write_failed", "detail": str(exc)}
+    _log(f"tokens.css written for {deck}")
+    # The preview may now pick tokens.css as the deck stylesheet: restart it with the new css.
+    info = deck_lib.describe_deck(deck, deck)
+    if info is not None:
+        PREVIEWS.ensure(deck, info["slidesDir"], _deck_css(deck), entry=info.get("entry"))
+    return 200, _design_payload(deck)
+
+
 # --- present / pdf --------------------------------------------------------
 def _output_url(deck: Path) -> tuple[str, str] | None:
     """(preview base url, output rel) for a deck whose output exists; None otherwise."""
@@ -404,6 +456,8 @@ ROUTES: dict[tuple[str, str], Route] = {
     ("POST", "/build/info"): route_build_info,
     ("POST", "/build"): route_build,
     ("POST", "/present"): route_present,
+    ("GET", "/design"): route_design,
+    ("POST", "/design/tokens"): route_design_tokens,
     ("POST", "/pdf"): route_pdf_start,
     ("GET", "/pdf"): route_pdf_status,
     ("POST", "/reveal"): route_reveal,

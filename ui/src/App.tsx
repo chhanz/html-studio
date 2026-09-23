@@ -1,7 +1,7 @@
 import { useAppApi } from '@kirocrew/app-sdk'
 import { Card, CardTitle, PageHeader } from '@kirocrew/app-sdk/ui'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ApiError, type BackendStatus, type BuildInfo, type BuildResult, type Deck, type PdfJob, type PreviewInfo, makeClient } from './api'
+import { ApiError, type BackendStatus, type BuildInfo, type BuildResult, type Deck, type DesignInfo, type PdfJob, type PreviewInfo, makeClient } from './api'
 import { BuildPanel } from './components/BuildPanel'
 import { DeckChat } from './components/DeckChat'
 import { DeckPanel } from './components/DeckPanel'
@@ -10,6 +10,7 @@ import { Section, useCollapsed } from './components/Section'
 import { SlideStrip } from './components/SlideStrip'
 import { SlideViewer } from './components/SlideViewer'
 import { SmallBtn } from './components/SmallBtn'
+import { ThemeRow } from './components/ThemeRow'
 import { Spinner } from './components/Spinner'
 import { LOCALES, type LocalePref, useI18n } from './i18n'
 
@@ -134,6 +135,43 @@ export default function HtmlStudio() {
   // --- present / pdf
   const [pdf, setPdf] = useState<PdfJob | null>(null)
   const [pdfError, setPdfError] = useState<string | null>(null)
+
+  // P1-8: DESIGN.md recognition. Read-only until the user asks for tokens.css.
+  const [designInfo, setDesignInfo] = useState<DesignInfo | null>(null)
+  const [tokensBusy, setTokensBusy] = useState(false)
+  useEffect(() => {
+    if (!selected || !selected.hasDesignMd) {
+      setDesignInfo(null)
+      return
+    }
+    let alive = true
+    client
+      .design(selected.path)
+      .then((i) => alive && setDesignInfo(i))
+      .catch((e) => {
+        console.warn('[html-studio] design failed', e)
+        alive && setDesignInfo(null)
+      })
+    return () => {
+      alive = false
+    }
+  }, [client, selected?.path, selected?.hasDesignMd]) // eslint-disable-line react-hooks/exhaustive-deps
+  const writeTokens = useCallback(async () => {
+    if (!selected) return
+    setTokensBusy(true)
+    try {
+      const info = await client.writeTokens(selected.path)
+      setDesignInfo(info)
+      // The backend restarted the preview with the new stylesheet: pick up its port/css.
+      const p = await client.previewStart(selected.path)
+      setPreview(p)
+      setReloadKey((k) => k + 1)
+    } catch (e) {
+      setPreviewError(e instanceof ApiError ? e.code : 'request_failed')
+    } finally {
+      setTokensBusy(false)
+    }
+  }, [client, selected])
 
   // P1-7: the deck's chat lives in the pane under the preview (DeckChat).
   const [chatOpen, setChatOpen] = useCollapsed('chat', false) // collapsed until wanted; the header says what it is
@@ -563,6 +601,7 @@ export default function HtmlStudio() {
               <SmallBtn className="ml-auto" onClick={() => { setPdf(null); setPdfError(null) }} aria-label={t('build.dismiss')}>✕</SmallBtn>
             </div>
           )}
+          {selected && designInfo && <ThemeRow t={t} info={designInfo} busy={tokensBusy} onWriteTokens={() => void writeTokens()} />}
           {selected && (buildResult || pendingCommand) && (
             <div className="mb-2 flex-none overflow-y-auto" style={{ maxHeight: "40%" }}>
               <BuildPanel

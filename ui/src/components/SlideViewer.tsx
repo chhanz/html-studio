@@ -58,7 +58,7 @@ export function SlideViewer({ t, preview, current, onChange, reloadKey }: Props)
         <span className="truncate ml-2" title={preview.slides[current]}>
           {preview.slides[current]}
         </span>
-        <span className="ml-auto">{preview.css ? preview.css : t('viewer.default_theme')}</span>
+        <span className="ml-auto">{preview.css ? (preview.css === 'tokens.css' ? t('viewer.tokens_theme') : preview.css) : t('viewer.default_theme')}</span>
       </div>
       <div className="flex-1 min-h-0" style={{ minHeight: 120 }}>
         <SlideFrame

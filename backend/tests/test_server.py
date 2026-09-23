@@ -18,6 +18,7 @@ import tempfile
 import time
 import unittest
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -105,7 +106,7 @@ class ServerTest(unittest.TestCase):
         code, data = self.request("GET", "/api/status", signed=True)
         self.assertEqual(code, 200)
         self.assertEqual(data["app"], "html-studio")
-        self.assertEqual(data["version"], "0.1.11")
+        self.assertEqual(data["version"], "0.1.12")
         self.assertTrue(data["dataDir"].startswith(self.tmp.name))
 
     def test_signed_unknown_route_is_404(self) -> None:
@@ -198,6 +199,45 @@ class ServerTest(unittest.TestCase):
 
             self.request("POST", "/api/roots/remove", signed=True,
                          body=json.dumps({"path": str(Path(root).resolve())}).encode())
+
+    def test_design_md_read_and_tokens_written(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.home()) as root:
+            deck = Path(root) / "deck"
+            (deck / "slides").mkdir(parents=True)
+            (deck / "slides" / "010.html").write_text("<section class='slide'><h1>x</h1></section>")
+            self.request("POST", "/api/roots/add", signed=True, body=json.dumps({"path": root}).encode())
+            q = "/api/design?path=" + urllib.parse.quote(str(deck))
+            code, data = self.request("GET", q, signed=True)
+            self.assertEqual((code, data["present"], data["tokensExists"]), (200, False, False))
+            code, data = self.request("POST", "/api/design/tokens", signed=True, body=json.dumps({"path": str(deck)}).encode())
+            self.assertEqual((code, data["error"]), (409, "no_design_md"))
+
+            (deck / "DESIGN.md").write_text(
+                "# Acme\n\n- **Teal** (`{colors.primary}` -- #0f766e)\n- **Paper** (`{colors.canvas-soft}` -- #f7f4ee)\n"
+            )
+            code, data = self.request("GET", q, signed=True)
+            self.assertEqual((code, data["present"], data["design"]["name"]), (200, True, "Acme"))
+            self.assertEqual(data["design"]["colors"]["primary"], "#0f766e")
+            self.assertIsNone(data["css"])  # no stylesheet yet: default theme
+
+            code, data = self.request("POST", "/api/design/tokens", signed=True, body=json.dumps({"path": str(deck)}).encode())
+            self.assertEqual((code, data["tokensExists"], data["tokensStale"], data["css"]), (200, True, False, "tokens.css"))
+            self.assertIn("--hs-accent: var(--color-primary)", (deck / "tokens.css").read_text())
+
+            # The preview now renders the default theme WITH the tokens overlay.
+            code, prev = self.request("POST", "/api/preview/start", signed=True, body=json.dumps({"path": str(deck)}).encode())
+            self.assertEqual(code, 200)
+            self.assertEqual(prev["css"], "tokens.css")
+            page = urllib.request.urlopen(prev["baseUrl"] + "/slide/0").read().decode()
+            self.assertIn("--hs-accent:#6d5efc", page)  # default theme inline
+            self.assertLess(page.index("--hs-accent:#6d5efc"), page.index('href="/tokens.css"'))  # tokens win
+
+            # Editing DESIGN.md marks tokens.css stale.
+            (deck / "DESIGN.md").write_text("# Acme\n\n- **Teal** (`{colors.primary}` -- #000000)\n")
+            code, data = self.request("GET", q, signed=True)
+            self.assertTrue(data["tokensStale"])
+            self.request("POST", "/api/preview/stop", signed=True, body=json.dumps({"path": str(deck)}).encode())
+            self.request("POST", "/api/roots/remove", signed=True, body=json.dumps({"path": root}).encode())
 
     def test_present_and_pdf_require_output(self) -> None:
         home = Path.home()

@@ -98,5 +98,15 @@
   "chat.open_full_hint": "이 세션을 채팅 페이지에서 열기",
   "chat.placeholder": "{name}에 바꿀 점을 말해 주세요…",
   "split.label": "미리보기/채팅 크기 조절",
-  "chat.tagline": "에이전트에게 이 덱의 수정을 요청합니다. 덱 폴더 안에서 작업합니다"
+  "chat.tagline": "에이전트에게 이 덱의 수정을 요청합니다. 덱 폴더 안에서 작업합니다",
+  "theme.colors": "테마 색상",
+  "theme.empty": "DESIGN.md에 스튜디오가 이해하는 토큰이 없습니다",
+  "theme.tokens.missing": "tokens.css 미생성",
+  "theme.tokens.stale": "tokens.css가 오래됨",
+  "theme.tokens.fresh": "tokens.css 최신",
+  "theme.tokens.write": "tokens.css 생성",
+  "theme.tokens.update": "tokens.css 갱신",
+  "theme.tokens.hint": "DESIGN.md의 값을 CSS 변수로 덱 폴더에 씁니다. 미리보기에 바로 적용됩니다",
+  "theme.tokens.own_css_hint": "이 덱은 {css}로 스타일을 정합니다. tokens.css는 그 스타일시트가 불러 쓰도록 옆에 생성됩니다",
+  "viewer.tokens_theme": "내장 테마 + tokens.css"
 }

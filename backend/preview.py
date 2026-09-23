@@ -32,12 +32,18 @@ _TEXT_TYPES = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=u
                ".js": "text/javascript; charset=utf-8", ".svg": "image/svg+xml"}
 
 
+def is_tokens_css(css_href: str) -> bool:
+    """``tokens.css`` (generated from DESIGN.md) is an overlay on the default
+    theme, not a replacement: it only defines custom properties."""
+    return css_href.rsplit("/", 1)[-1] == "tokens.css"
+
+
 def default_theme_css() -> str:
     """Minimal neutral theme used when a deck ships no stylesheet."""
     return f"""
 :root {{ --hs-bg:#ffffff; --hs-fg:#1f2430; --hs-muted:#6b7280; --hs-accent:#6d5efc; --hs-border:#e5e7eb; }}
 html,body {{ margin:0; background:var(--hs-bg); color:var(--hs-fg);
-  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans KR","Apple SD Gothic Neo",sans-serif; }}
+  font-family:var(--hs-font, -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans KR","Apple SD Gothic Neo",sans-serif); }}
 .slide {{ box-sizing:border-box; width:{STAGE_W}px; height:{STAGE_H}px; padding:56px 64px; display:flex; flex-direction:column; gap:20px; overflow:hidden; }}
 .slide h1 {{ font-size:56px; margin:0; line-height:1.1; letter-spacing:-.02em; }}
 .slide h2 {{ font-size:32px; margin:0; line-height:1.2; }}
@@ -45,7 +51,7 @@ html,body {{ margin:0; background:var(--hs-bg); color:var(--hs-fg);
 .slide p, .slide li {{ font-size:20px; line-height:1.5; }}
 .slide .muted {{ color:var(--hs-muted); }}
 .slide .accent {{ color:var(--hs-accent); }}
-.slide.cover, .slide.divider {{ background:linear-gradient(135deg,#1e1b4b,#312e81); color:#fff; justify-content:center; }}
+.slide.cover, .slide.divider {{ background:var(--hs-cover, linear-gradient(135deg,#1e1b4b,#312e81)); color:var(--hs-on-cover, #fff); justify-content:center; }}
 """
 
 
@@ -66,7 +72,7 @@ def wrap_slide(
     ``head_extra`` carries a single-file deck's own ``<link>``/``<style>`` tags.
     """
     link = f'<link rel="stylesheet" href="{html.escape(css_href, quote=True)}">' if css_href else ""
-    inline = "" if (css_href or head_extra) else f"<style>{default_theme_css()}</style>"
+    inline = "" if head_extra or (css_href and not is_tokens_css(css_href)) else f"<style>{default_theme_css()}</style>"
     force = (
         "<style>"
         f"html,body{{margin:0;overflow:hidden;width:{STAGE_W}px;height:{STAGE_H}px}}"
@@ -79,7 +85,7 @@ def wrap_slide(
         fragment = _inject_pageno(fragment, page_number)
     return (
         "<!doctype html><html><head><meta charset=\"utf-8\"><base href=\"/\">"
-        f"<title>{html.escape(title)}</title>{head_extra}{link}{inline}{force}</head>"
+        f"<title>{html.escape(title)}</title>{head_extra}{inline}{link}{force}</head>"
         f"<body><div class=\"hs-stage\">{fragment}</div></body></html>"
     )
 
@@ -189,7 +195,7 @@ class DeckPreview:
         self.entry = entry
         # Individual files outside the static prefixes that may be served, e.g. the
         # deck's declared build output ("index.html").
-        self.extra_files = frozenset(f.strip("/") for f in extra_files if f)
+        self.extra_files = frozenset(f.strip("/") for f in extra_files if f) | ({css_rel.strip("/")} if css_rel else frozenset())
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
 
@@ -276,7 +282,7 @@ class DeckPreview:
             title = self.deck_dir.name
         css_href = None if head_extra else self._css_href()
         link = f'<link rel="stylesheet" href="{html.escape(css_href, quote=True)}">' if css_href else ""
-        inline = "" if (css_href or head_extra) else f"<style>{default_theme_css()}</style>"
+        inline = "" if head_extra or (css_href and not is_tokens_css(css_href)) else f"<style>{default_theme_css()}</style>"
         force = (
             "<style>"
             f"@page{{size:{STAGE_W}px {STAGE_H}px;margin:0}}"
@@ -292,7 +298,7 @@ class DeckPreview:
         body = "".join(_inject_pageno(frag, i + 1) for i, frag in enumerate(fragments))
         return (
             "<!doctype html><html><head><meta charset=\"utf-8\"><base href=\"/\">"
-            f"<title>{html.escape(title)}</title>{head_extra}{link}{inline}{force}</head>"
+            f"<title>{html.escape(title)}</title>{head_extra}{inline}{link}{force}</head>"
             f"<body class=\"hs-print stage\">{body}</body></html>"
         )
 
@@ -341,12 +347,17 @@ class DeckPreview:
 
 
 def _send(h: BaseHTTPRequestHandler, code: int, body: bytes, ctype: str) -> None:
-    h.send_response(code)
-    h.send_header("Content-Type", ctype)
-    h.send_header("Content-Length", str(len(body)))
-    h.send_header("Cache-Control", "no-store")
-    h.end_headers()
-    h.wfile.write(body)
+    try:
+        h.send_response(code)
+        h.send_header("Content-Type", ctype)
+        h.send_header("Content-Length", str(len(body)))
+        h.send_header("Cache-Control", "no-store")
+        h.end_headers()
+        h.wfile.write(body)
+    except (BrokenPipeError, ConnectionResetError):
+        # The client went away mid-response (an iframe reloading after a preview
+        # restart does this routinely). Nothing to do and nothing to log.
+        pass
 
 
 class PreviewRegistry:
@@ -365,10 +376,10 @@ class PreviewRegistry:
         entry: str | None = None,
     ) -> DeckPreview:
         key = str(deck_dir.resolve())
-        wanted = frozenset(f.strip("/") for f in extra_files if f)
+        wanted = frozenset(f.strip("/") for f in extra_files if f) | ({css_rel.strip("/")} if css_rel else frozenset())
         with self._lock:
             existing = self._by_deck.get(key)
-            if existing and existing.port and existing.extra_files == wanted and existing.entry == entry:
+            if existing and existing.port and existing.extra_files == wanted and existing.entry == entry and existing.css_rel == css_rel:
                 return existing
             if existing:
                 existing.stop()
