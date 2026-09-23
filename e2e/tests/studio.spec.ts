@@ -849,8 +849,8 @@ test('strip arranges slides: add, duplicate, drag to reorder, archive and restor
   await page.getByTestId('strip-add').click()
   await page.getByRole('dialog', { name: 'Add a slide' }).getByRole('button', { name: 'Insert Blank' }).click()
   await expect(items).toHaveCount(5)
-  expect(await names()).toEqual(['010_cover.html', '020_agenda.html', '030_new.html', '040_uptime.html', '050_roadmap.html'])
-  await expect(page.locator('#slides-body [aria-current="true"]')).toContainText('030_new.html')
+  expect(await names()).toEqual(['010_cover.html', '020_agenda.html', '025_new.html', '030_uptime.html', '040_roadmap.html'])
+  await expect(page.locator('#slides-body [aria-current="true"]')).toContainText('025_new.html')
   await expect(page.frameLocator('[data-testid="slide-stage"] iframe').locator('h2')).toHaveText('New slide')
 
   // Duplicate the agenda from its menu.
@@ -858,13 +858,13 @@ test('strip arranges slides: add, duplicate, drag to reorder, archive and restor
   await page.getByRole('button', { name: 'Slide actions' }).click()
   await page.getByRole('menuitem', { name: 'Duplicate' }).click()
   await expect(items).toHaveCount(6)
-  expect(await names()).toEqual(['010_cover.html', '020_agenda.html', '030_agenda-copy.html', '040_new.html', '050_uptime.html', '060_roadmap.html'])
-  await expect(page.locator('#slides-body [aria-current="true"]')).toContainText('030_agenda-copy.html')
+  expect(await names()).toEqual(['010_cover.html', '020_agenda.html', '022_agenda-copy.html', '025_new.html', '030_uptime.html', '040_roadmap.html'])
+  await expect(page.locator('#slides-body [aria-current="true"]')).toContainText('022_agenda-copy.html')
 
   // Move down via the menu, then drag the cover onto the third slide (it lands after it).
   await page.getByRole('button', { name: 'Slide actions' }).click()
   await page.getByRole('menuitem', { name: 'Move down' }).click()
-  await expect.poll(names).toEqual(['010_cover.html', '020_agenda.html', '030_new.html', '040_agenda-copy.html', '050_uptime.html', '060_roadmap.html'])
+  await expect.poll(names).toEqual(['010_cover.html', '020_agenda.html', '025_new.html', '027_agenda-copy.html', '030_uptime.html', '040_roadmap.html'])
   const drag = async (from: number, to: number) => {
     const a = (await items.nth(from).boundingBox())!
     const b = (await items.nth(to).boundingBox())!
@@ -876,10 +876,10 @@ test('strip arranges slides: add, duplicate, drag to reorder, archive and restor
   }
   await items.nth(0).locator('> button').click() // selecting scrolls it into view: the strip is taller than its box
   await drag(0, 2)
-  await expect.poll(names).toEqual(['010_agenda.html', '020_new.html', '030_cover.html', '040_agenda-copy.html', '050_uptime.html', '060_roadmap.html'])
+  await expect.poll(names).toEqual(['020_agenda.html', '025_new.html', '026_cover.html', '027_agenda-copy.html', '030_uptime.html', '040_roadmap.html'])
   // The note followed the agenda slide to its new name.
   const notes = await (await page.request.get(`/apps/html-studio/api/notes?path=${encodeURIComponent(deckPath)}`)).json()
-  expect(notes.withNotes).toEqual(['010_agenda.html'])
+  expect(notes.withNotes).toEqual(['020_agenda.html'])
   await expect(items.nth(0).getByTestId('strip-note')).toBeVisible()
 
   // Archive the blank slide: it leaves the strip and shows up in the archive box; restore puts it back after the current slide.
@@ -887,17 +887,17 @@ test('strip arranges slides: add, duplicate, drag to reorder, archive and restor
   await page.getByRole('button', { name: 'Slide actions' }).click()
   await page.getByRole('menuitem', { name: 'Archive' }).click()
   await expect(items).toHaveCount(5)
-  expect(await names()).not.toContain('020_new.html')
+  expect(await names()).not.toContain('025_new.html')
   const box = page.getByTestId('archive-list')
   await expect(box).toContainText('Archive (1)')
   await box.getByRole('button', { name: /Archive \(1\)/ }).click()
-  await expect(box).toContainText('020_new.html')
+  await expect(box).toContainText('025_new.html')
   await items.nth(4).locator('> button').click() // current = last (roadmap)
   await box.getByRole('button', { name: 'Restore' }).click()
   await expect(items).toHaveCount(6)
-  expect(await names()).toEqual(['010_agenda.html', '020_cover.html', '030_agenda-copy.html', '040_uptime.html', '050_roadmap.html', '060_new.html'])
+  expect(await names()).toEqual(['020_agenda.html', '026_cover.html', '027_agenda-copy.html', '030_uptime.html', '040_roadmap.html', '050_new.html'])
   await expect(box).toHaveCount(0)
-  await expect(page.locator('#slides-body [aria-current="true"]')).toContainText('060_new.html')
+  await expect(page.locator('#slides-body [aria-current="true"]')).toContainText('050_new.html')
 })
 
 test('layout library: pick a built-in layout rendered in the deck style, save a slide as my layout, insert it, delete it', async ({ page }) => {
@@ -921,8 +921,8 @@ test('layout library: pick a built-in layout rendered in the deck style, save a 
   await dialog.getByRole('button', { name: 'Insert Key numbers' }).click()
   await expect(dialog).toHaveCount(0)
   await expect(items).toHaveCount(5)
-  expect(await names()).toEqual(['010_cover.html', '020_kpi.html', '030_agenda.html', '040_uptime.html', '050_roadmap.html'])
-  await expect(page.locator('#slides-body [aria-current="true"]')).toContainText('020_kpi.html')
+  expect(await names()).toEqual(['010_cover.html', '015_kpi.html', '020_agenda.html', '030_uptime.html', '040_roadmap.html'])
+  await expect(page.locator('#slides-body [aria-current="true"]')).toContainText('015_kpi.html')
   await expect(page.frameLocator('[data-testid="slide-stage"] iframe').locator('h2')).toHaveText('Key numbers')
 
   // Save the agenda as my layout.
@@ -942,8 +942,8 @@ test('layout library: pick a built-in layout rendered in the deck style, save a 
   await expect(dialog.getByTestId('layout-card')).toHaveCount(9)
   await dialog.getByRole('button', { name: 'Insert Acme agenda' }).click()
   await expect(items).toHaveCount(6)
-  expect((await names())[5]).toBe('060_acme-agenda.html')
-  const added = await (await page.request.get(`/__ctl/read?path=${encodeURIComponent(deckPath + '/slides/060_acme-agenda.html')}`)).text()
+  expect((await names())[5]).toBe('050_acme-agenda.html')
+  const added = await (await page.request.get(`/__ctl/read?path=${encodeURIComponent(deckPath + '/slides/050_acme-agenda.html')}`)).text()
   expect(added).toContain('Agenda')
   await page.getByTestId('strip-add').click()
   await dialog.getByRole('button', { name: 'Delete layout Acme agenda' }).click()

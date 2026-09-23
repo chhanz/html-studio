@@ -70,6 +70,20 @@ class TweakTests(unittest.TestCase):
             with self.assertRaises(tweak.TweakError):
                 tweak.apply(deck, {"--color-primary": "red"})
 
+    def test_own_css_deck_keeps_its_stylesheet_and_layers_tokens(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            deck = Path(tmp)
+            (deck / "slides").mkdir()
+            (deck / "slides" / "010.html").write_text("<section class='slide'>x</section>")
+            (deck / "assets").mkdir()
+            (deck / "assets" / "deck.css").write_text(".slide{color:red}")
+            r = tweak.apply(deck, {"--hs-accent": "#00aa00"})
+            self.assertTrue(r["created"])
+            self.assertTrue((deck / "tokens.css").is_file())
+            self.assertFalse((deck / "studio.json").exists())  # css choice untouched: assets/deck.css still wins
+            d = tweak.describe(deck)
+            self.assertEqual((d["css"], d["layered"]), ("assets/deck.css", True))
+
     def test_apply_creates_design_for_plain_deck(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             deck = newdeck.create_deck(Path(tmp), "plain", {"title": "P"}, {"kind": "default"})

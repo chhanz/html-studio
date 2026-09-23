@@ -161,7 +161,8 @@ export function TweakPanel({ t, client, deckPath, design, onWriteTokens, tokensB
         <SmallBtn onClick={onClose}>{t('layout.close')}</SmallBtn>
       </div>
       <p className="m-0 mb-2 text-muted flex-none">{info?.hasDesign ? t('tweak.hint_design') : t('tweak.hint_default')}</p>
-      {info?.hasDesign && design && !design.empty && (!design.tokensExists || design.tokensStale || info.css !== 'tokens.css') && (
+      {info?.hasDesign && info.layered && <p className="m-0 mb-2 text-muted flex-none">{t('tweak.hint_layered', { css: info.css ?? '' })}</p>}
+      {info?.hasDesign && design && !design.empty && (!design.tokensExists || design.tokensStale || (info.css !== 'tokens.css' && !info.layered)) && (
         <div className="mb-2 flex-none flex items-center gap-2 flex-wrap rounded-md border px-2 py-1" style={{ borderColor: 'var(--warn)' }}>
           <span style={{ color: 'var(--warn)' }}>{!design.tokensExists ? t('theme.tokens.missing') : design.tokensStale ? t('theme.tokens.stale') : t('tweak.hint_no_tokens')}</span>
           {onWriteTokens && (

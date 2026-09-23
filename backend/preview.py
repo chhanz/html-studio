@@ -73,6 +73,7 @@ def wrap_slide(
     title: str = "",
     page_number: int | None = None,
     head_extra: str = "",
+    tokens_href: str | None = None,
 ) -> str:
     """Return a standalone page that renders one slide fragment at stage size.
 
@@ -82,6 +83,9 @@ def wrap_slide(
     ``head_extra`` carries a single-file deck's own ``<link>``/``<style>`` tags.
     """
     link = f'<link rel="stylesheet" href="{html.escape(css_href, quote=True)}">' if css_href else ""
+    if tokens_href and not (css_href and is_tokens_css(css_href)):
+        # Variables layer: the theme's tokens.css goes first so the deck's own stylesheet can read its variables.
+        link = f'<link rel="stylesheet" href="{html.escape(tokens_href, quote=True)}">' + link
     inline = "" if head_extra or (css_href and not is_tokens_css(css_href)) else f"<style>{default_theme_css()}</style>"
     force = (
         "<style>"
@@ -449,12 +453,13 @@ class DeckPreview:
                 title=f"{self.entry}#{index + 1}",
                 page_number=index + 1,
                 extra_css=self.overrides_css,
+                tokens_href=None if head_extra else self._tokens_href(),
             )
         files = self.slide_files()
         if index < 0 or index >= len(files):
             return None
         fragment = files[index].read_text(encoding="utf-8", errors="replace")
-        return wrap_slide(fragment, css_href=self._css_href(), title=files[index].name, page_number=index + 1, extra_css=self.overrides_css)
+        return wrap_slide(fragment, css_href=self._css_href(), title=files[index].name, page_number=index + 1, extra_css=self.overrides_css, tokens_href=self._tokens_href())
 
     def presenter_page(self, lang: str = "en") -> str:
         """The presenter window (inject/presenter.html) configured for this deck."""
@@ -483,6 +488,9 @@ class DeckPreview:
             title = self.deck_dir.name
         css_href = None if head_extra else self._css_href()
         link = f'<link rel="stylesheet" href="{html.escape(css_href, quote=True)}">' if css_href else ""
+        tokens_href = None if head_extra else self._tokens_href()
+        if tokens_href:
+            link = f'<link rel="stylesheet" href="{tokens_href}">' + link
         inline = "" if head_extra or (css_href and not is_tokens_css(css_href)) else f"<style>{default_theme_css()}</style>"
         force = (
             "<style>"
@@ -505,6 +513,12 @@ class DeckPreview:
 
     def _css_href(self) -> str | None:
         return f"/{self.css_rel}" if self.css_rel and (self.deck_dir / self.css_rel).is_file() else None
+
+    def _tokens_href(self) -> str | None:
+        """tokens.css as a variables layer under a deck's own stylesheet (None when absent or already the css)."""
+        if self.css_rel and is_tokens_css(self.css_rel):
+            return None
+        return "/tokens.css" if (self.deck_dir / "tokens.css").is_file() else None
 
     # --- static
     def resolve_static(self, url_path: str) -> Path | None:
@@ -585,7 +599,7 @@ class DeckPreview:
             html_src = LAYOUT_RESOLVER(path[len("/layout/"):]) if LAYOUT_RESOLVER else None
             if html_src is None:
                 return _send(h, 404, b"no such layout", "text/plain")
-            return _send(h, 200, wrap_slide(html_src, css_href=self._css_href(), title="layout", page_number=0, extra_css=self.overrides_css).encode("utf-8"), "text/html; charset=utf-8")
+            return _send(h, 200, wrap_slide(html_src, css_href=self._css_href(), title="layout", page_number=0, extra_css=self.overrides_css, tokens_href=self._tokens_href()).encode("utf-8"), "text/html; charset=utf-8")
         if path == "/presenter":
             lang = parse_qs(url.query).get("lang", ["en"])[0][:5]
             return _send(h, 200, self.presenter_page(lang).encode("utf-8"), "text/html; charset=utf-8")

@@ -62,7 +62,7 @@ def describe(deck: Path) -> dict[str, Any]:
         for var, kind, default in DEFAULT_HOOKS:
             items.append({"var": var, "group": "colors", "name": var[len("--hs-"):], "kind": kind, "value": default})
         items.append({"var": "--hs-font", "group": "font", "name": "family", "kind": "text", "value": ""})
-        return {"hasDesign": d is not None, "items": items, "css": _deck_css_rel(deck)}
+        return {"hasDesign": d is not None, "items": items, "css": _deck_css_rel(deck) or _own_css(deck)}
     for name, value in d.colors.items():
         items.append({"var": design_lib._var_name("color", name), "group": "colors", "name": name, "kind": "color", "value": value})
     if d.font_family or d.font_fallback:
@@ -75,7 +75,19 @@ def describe(deck: Path) -> dict[str, Any]:
         items.append({"var": design_lib._var_name("space", name), "group": "spacing", "name": name, "kind": _kind_of(value), "value": value})
     for name, value in d.rounded.items():
         items.append({"var": design_lib._var_name("radius", name), "group": "rounded", "name": name, "kind": _kind_of(value), "value": value})
-    return {"hasDesign": True, "items": items, "css": _deck_css_rel(deck)}
+    css = _deck_css_rel(deck) or _own_css(deck)
+    return {"hasDesign": True, "items": items, "css": css, "layered": bool(css and css != design_lib.TOKENS_FILE and (deck / design_lib.TOKENS_FILE).is_file())}
+
+
+OWN_CSS_CANDIDATES = ("assets/deck.css", "out/assets/deck.css", "deck.css")
+
+
+def _own_css(deck: Path) -> str | None:
+    """A stylesheet the deck ships itself (the server's candidate list, minus tokens.css)."""
+    for rel in OWN_CSS_CANDIDATES:
+        if (deck / rel).is_file():
+            return rel
+    return None
 
 
 def _deck_css_rel(deck: Path) -> str | None:
@@ -229,7 +241,10 @@ def apply(deck: Path, changes: dict[str, str]) -> dict[str, Any]:
     if d2 is None or d2.empty:
         raise TweakError("design_failed")
     design_lib.write_tokens(deck, d2)
-    if created or _deck_css_rel(deck) is None:
+    # A deck with its own stylesheet keeps it: tokens.css is served underneath as a
+    # variables layer (preview and built-in build both link it first). Only a deck
+    # with no stylesheet at all gets tokens.css as its css.
+    if _deck_css_rel(deck) is None and not _own_css(deck):
         studio_path = deck / deck_lib.STUDIO_FILE
         studio = deck_lib._read_studio(deck) or {}
         studio.setdefault("slidesDir", "slides")

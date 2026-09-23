@@ -1,8 +1,10 @@
 """Slide arrangement: reorder, add, duplicate, archive and restore.
 
-Split decks (``slides/NNN_name.html``): order is the file name order, so a
-reorder renumbers the prefixes (10, 20, 30 ...) and renames only the files
-whose number changes; the part after the prefix is kept. Archiving MOVES the
+Split decks (``slides/NNN_name.html``): order is the file name order. A
+reorder keeps every unmoved file on its number and slots the moved one into a
+free number between its neighbours (renumbering a stretch in 10s only when
+there is no room), so real decks with hand-picked numbers are not rewritten
+wholesale; the part after the prefix is always kept. Archiving MOVES the
 file into ``archive/`` (never deletes); restoring moves it back with a fresh
 number. Speaker notes (``notes/<slide>.md``) follow their slide.
 
@@ -55,9 +57,71 @@ def _stem_after_prefix(name: str) -> str:
     return rest or name
 
 
-def _numbered(n: int, rest: str) -> str:
-    width = 3 if n < 1000 else len(str(n))
-    return f"{n:0{width}d}_{rest}"
+def _numbered(n: int, rest: str, width: int = 3) -> str:
+    return f"{n:0{max(width, len(str(n)))}d}_{rest}"
+
+
+def _number_of(name: str) -> int | None:
+    m = _PREFIX_RE.match(name)
+    return int(m.group(1)) if m and not name.startswith(STAGE) else None
+
+
+def _keep_mask(ordered: list[str]) -> list[bool]:
+    """Which files can keep their current name: the longest run of names that
+    already sort in the wanted order (the deck lists slides lexically, so this is
+    a longest increasing subsequence on the names). Everything else is renamed."""
+    n = len(ordered)
+    best = [1] * n
+    prev = [-1] * n
+    for i in range(n):
+        if ordered[i].startswith(STAGE) or _number_of(ordered[i]) is None:
+            best[i] = 0
+            continue
+        for j in range(i):
+            if best[j] and ordered[j] < ordered[i] and best[j] + 1 > best[i]:
+                best[i], prev[i] = best[j] + 1, j
+    keep = [False] * n
+    i = max(range(n), key=lambda k: best[k]) if n else -1
+    while i >= 0 and best[i] > 0:
+        keep[i] = True
+        i = prev[i]
+    return keep
+
+
+def _assign_numbers(ordered: list[str]) -> list[int]:
+    """Numbers for ``ordered`` that keep every file whose position did not
+    change on its current number, so a reorder renames only what moved.
+
+    A moved or new file takes a free number between its kept neighbours
+    (midpoint when possible); when a stretch has no room, that stretch and the
+    files after it are renumbered in steps of 10.
+    """
+    keep = _keep_mask(ordered)
+    out: list[int | None] = [_number_of(n) if k else None for n, k in zip(ordered, keep)]
+    i = 0
+    while i < len(out):
+        if out[i] is not None:
+            i += 1
+            continue
+        j = i
+        while j < len(out) and out[j] is None:
+            j += 1
+        lo = out[i - 1] if i > 0 else 0  # exclusive lower bound
+        hi = out[j] if j < len(out) else None  # exclusive upper bound
+        count = j - i
+        if hi is None:
+            for k in range(count):
+                out[i + k] = lo + STEP * (k + 1)
+        elif hi - lo - 1 >= count:
+            span = hi - lo
+            for k in range(count):
+                out[i + k] = lo + (span * (k + 1)) // (count + 1)
+        else:
+            for k in range(i, len(out)):
+                out[k] = lo + STEP * (k - i + 1)
+            break
+        i = j
+    return [n if n is not None else 0 for n in out]
 
 
 def _move_note(deck: Path, old: str, new: str) -> None:
@@ -76,10 +140,24 @@ def _rename_all(deck: Path, slides_dir: str, ordered: list[str]) -> list[str]:
     Two passes through temporary names, so a swap never overwrites a file.
     """
     d = deck / slides_dir
-    targets = [_numbered((i + 1) * STEP, _stem_after_prefix(n)) for i, n in enumerate(ordered)]
+    numbers = _assign_numbers(ordered)
+    # Zero-padding: an unchanged file keeps its own name; a renamed one is padded
+    # like its previous prefix (or like its neighbours for a new file), so a deck
+    # mixing 3- and 4-digit prefixes is not rewritten to one width.
+    keep = _keep_mask(ordered)
+    own = [len(m.group(1)) if (m := _PREFIX_RE.match(n)) and not n.startswith(STAGE) else 0 for n in ordered]
+    targets = []
+    for i, (num, n) in enumerate(zip(numbers, ordered)):
+        if keep[i]:
+            targets.append(n)
+            continue
+        # A renamed file is padded like the kept neighbour it must sort next to.
+        near = [own[k] for k in (i - 1, i + 1) if 0 <= k < len(own) and keep[k] and own[k]]
+        w = max(near) if near else (own[i] or 3)
+        targets.append(_numbered(num, _stem_after_prefix(n), w))
     if len(set(targets)) != len(targets):
         # Two slides share the same stem: fall back to the full old name after the number.
-        targets = [_numbered((i + 1) * STEP, n if targets.count(t) > 1 else _stem_after_prefix(n)) for i, (n, t) in enumerate(zip(ordered, targets))]
+        targets = [t if targets.count(t) == 1 else _numbered(num, n, len(t.split("_", 1)[0])) for num, (n, t) in zip(numbers, zip(ordered, targets))]
     changes = [(o, n) for o, n in zip(ordered, targets) if o != n]
     if not changes:
         return targets

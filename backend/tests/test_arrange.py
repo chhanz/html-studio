@@ -29,13 +29,25 @@ class SplitDeckTests(unittest.TestCase):
     def test_reorder_renumbers_and_moves_notes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             deck = _split_deck(tmp)
+            # Only the moved slide is renamed: the others keep their numbers.
             new = arrange.reorder(deck, "slides", None, ["010_cover.html", "030_uptime.html", "040_roadmap.html", "020_agenda.html"])
-            self.assertEqual(new, ["010_cover.html", "020_uptime.html", "030_roadmap.html", "040_agenda.html"])
+            self.assertEqual(new, ["010_cover.html", "030_uptime.html", "040_roadmap.html", "050_agenda.html"])
             self.assertEqual(_names(deck), new)
-            self.assertEqual((deck / "slides" / "040_agenda.html").read_text(), "<section class='slide'>020_agenda</section>")
-            self.assertEqual((deck / "notes" / "040_agenda.md").read_text(), "agenda note\n")
-            self.assertEqual((deck / "notes" / "030_roadmap.md").read_text(), "roadmap note\n")
+            self.assertEqual((deck / "slides" / "050_agenda.html").read_text(), "<section class='slide'>020_agenda</section>")
+            self.assertEqual((deck / "notes" / "050_agenda.md").read_text(), "agenda note\n")
+            self.assertEqual((deck / "notes" / "040_roadmap.md").read_text(), "roadmap note\n")
             self.assertFalse((deck / "notes" / "020_agenda.md").exists())
+            # A swap of neighbours with room between them renames one file into the gap.
+            new = arrange.reorder(deck, "slides", None, ["010_cover.html", "040_roadmap.html", "030_uptime.html", "050_agenda.html"])
+            self.assertEqual(new, ["010_cover.html", "040_roadmap.html", "045_uptime.html", "050_agenda.html"])
+            # Gappy, hand-picked numbering survives an unrelated move (real decks: 000/005/010 ... 990).
+            for n in list((deck / "slides").iterdir()):
+                n.unlink()
+            for n in ("000_cover", "005_agenda", "010_div", "470_cost", "480_cost", "990_closing"):
+                (deck / "slides" / f"{n}.html").write_text("<section class='slide'>x</section>")
+            new = arrange.reorder(deck, "slides", None, ["000_cover.html", "005_agenda.html", "010_div.html", "480_cost.html", "470_cost.html", "990_closing.html"])
+            self.assertEqual(new, ["000_cover.html", "005_agenda.html", "010_div.html", "480_cost.html", "735_cost.html", "990_closing.html"])
+            self.assertEqual(new[:3] + new[5:], ["000_cover.html", "005_agenda.html", "010_div.html", "990_closing.html"])
             self.assertEqual([p.name for p in (deck / "slides").iterdir() if p.name.startswith(".")], [])
             with self.assertRaises(arrange.ArrangeError):
                 arrange.reorder(deck, "slides", None, ["010_cover.html"])  # not a permutation
@@ -43,17 +55,18 @@ class SplitDeckTests(unittest.TestCase):
     def test_add_duplicate_archive_restore(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             deck = _split_deck(tmp)
+            # A new slide takes a free number between its neighbours; nothing else is renamed.
             name = arrange.add(deck, "slides", None, "020_agenda.html")
-            self.assertEqual(name, "030_new.html")
-            self.assertEqual(_names(deck), ["010_cover.html", "020_agenda.html", "030_new.html", "040_uptime.html", "050_roadmap.html"])
-            self.assertIn("<h2>New slide</h2>", (deck / "slides" / "030_new.html").read_text())
-            self.assertEqual((deck / "notes" / "050_roadmap.md").read_text(), "roadmap note\n")
+            self.assertEqual(name, "025_new.html")
+            self.assertEqual(_names(deck), ["010_cover.html", "020_agenda.html", "025_new.html", "030_uptime.html", "040_roadmap.html"])
+            self.assertIn("<h2>New slide</h2>", (deck / "slides" / "025_new.html").read_text())
+            self.assertEqual((deck / "notes" / "040_roadmap.md").read_text(), "roadmap note\n")
             dup = arrange.add(deck, "slides", None, "020_agenda.html", duplicate=True)
-            self.assertEqual(dup, "030_agenda-copy.html")
+            self.assertEqual(dup, "022_agenda-copy.html")
             self.assertEqual((deck / "slides" / dup).read_text(), "<section class='slide'>020_agenda</section>")
-            self.assertEqual(_names(deck)[3], "040_new.html")
-            # Append at the end when after is None.
-            self.assertEqual(arrange.add(deck, "slides", None, None), "070_new.html")
+            self.assertEqual(_names(deck)[3], "025_new.html")
+            # Append at the end when after is None: last number + 10.
+            self.assertEqual(arrange.add(deck, "slides", None, None), "050_new.html")
             # Archive moves the file and its note; the rest is renumbered? No: names stay, order is unchanged.
             gone = arrange.archive(deck, "slides", None, "020_agenda.html")
             self.assertEqual(gone, {"name": "020_agenda.html", "file": "archive/020_agenda.html"})
@@ -64,9 +77,9 @@ class SplitDeckTests(unittest.TestCase):
             self.assertTrue(arrange.list_archive(deck)[0]["hasNote"])
             # Restore after the cover: numbered into place, note back.
             back = arrange.restore(deck, "slides", None, "020_agenda.html", "010_cover.html")
-            self.assertEqual(back, "020_agenda.html")
-            self.assertEqual(_names(deck)[:3], ["010_cover.html", "020_agenda.html", "030_agenda-copy.html"])
-            self.assertEqual((deck / "notes" / "020_agenda.md").read_text(), "agenda note\n")
+            self.assertEqual(back, "016_agenda.html")
+            self.assertEqual(_names(deck)[:3], ["010_cover.html", "016_agenda.html", "022_agenda-copy.html"])
+            self.assertEqual((deck / "notes" / "016_agenda.md").read_text(), "agenda note\n")
             self.assertEqual(arrange.list_archive(deck), [])
             with self.assertRaises(arrange.ArrangeError):
                 arrange.restore(deck, "slides", None, "../secret.html", None)

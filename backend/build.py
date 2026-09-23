@@ -198,6 +198,8 @@ def run_builtin(deck: Path, slides_dir: str, output: str, css_rel: str | None = 
     base_href = "../" * depth if depth else "./"
     if css_rel and (deck / css_rel).is_file():
         theme = f'<link rel="stylesheet" href="{html.escape(css_rel, quote=True)}">'
+        if css_rel != "tokens.css" and (deck / "tokens.css").is_file():
+            theme = '<link rel="stylesheet" href="tokens.css">' + theme  # variables layer under the deck css
         css = ""
     else:
         theme = ""

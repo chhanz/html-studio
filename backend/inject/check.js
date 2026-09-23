@@ -134,8 +134,12 @@
       if (img.complete && img.naturalWidth === 0) push('broken-image', img, 'image did not load: ' + (img.getAttribute('src') || ''), { src: img.getAttribute('src') })
     })
 
-    // content elements for overlap / contrast / text rules
+    // content elements for overlap / contrast / text rules. An inline <svg>
+    // (a chart, an icon) counts as ONE picture: its labels and shapes touch each
+    // other by design, so nothing inside it is inspected.
+    function insideSvg(el) { var p = el.parentElement; while (p && p !== slide) { if (p.tagName === 'svg' || p.tagName === 'SVG') return true; p = p.parentElement } return false }
     var content = all.filter(function (el) {
+      if (insideSvg(el)) return false
       return hasOwnText(el) || el.tagName === 'IMG' || el.tagName === 'SVG' || el.tagName === 'svg' || el.tagName === 'VIDEO'
     })
 
@@ -175,16 +179,24 @@
     })
 
     // text rules
+    // One issue per slide per character kind (the first element that has it, with
+    // a count), so a deck that uses middle dots as separators gets one line per
+    // slide instead of one per heading.
+    var punct = {}
     content.forEach(function (el) {
       if (!hasOwnText(el)) return
       var own = ''
       for (var n = el.firstChild; n; n = n.nextSibling) if (n.nodeType === 3) own += n.nodeValue
-      var found = []
-      if (/[\u2014]/.test(own)) found.push('em dash')
-      if (/[\u2013]/.test(own)) found.push('en dash')
-      if (/[\u00b7\u2027\u30fb]/.test(own)) found.push('middle dot')
-      if (/[\u2022]/.test(own)) found.push('bullet character')
-      if (found.length) push('punctuation', el, 'contains ' + found.join(', '))
+      var kinds = [['em dash', /[\u2014]/], ['en dash', /[\u2013]/], ['middle dot', /[\u00b7\u2027\u30fb]/], ['bullet character', /[\u2022]/]]
+      kinds.forEach(function (k) {
+        if (!k[1].test(own)) return
+        if (!punct[k[0]]) punct[k[0]] = { el: el, count: 0 }
+        punct[k[0]].count++
+      })
+    })
+    Object.keys(punct).forEach(function (kind) {
+      var p = punct[kind]
+      push('punctuation', p.el, 'contains ' + kind + (p.count > 1 ? ' (' + p.count + ' elements on this slide)' : ''))
     })
 
     // inline font-size
