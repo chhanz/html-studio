@@ -9,6 +9,7 @@ Routes (all GET):
   /health                    liveness
   /slide/<index>             one slide fragment wrapped into a full page (?hs=select adds the overlay)
   /print                     every slide as one 1280x720 page (PDF export)
+  /check                     measures every slide (deck check, headless)
   /assets/<path>, /img/<path>, /out/<path>
                              static files from the deck folder (contained)
 
@@ -18,6 +19,7 @@ The wrapper forces the single slide visible: deck stylesheets normally hide
 from __future__ import annotations
 
 import html
+import json
 import mimetypes
 import re
 import threading
@@ -185,6 +187,16 @@ def inject_select_helper(page: str) -> str:
     return page + script
 
 
+def check_document(count: int, stage: tuple[int, int] = (STAGE_W, STAGE_H)) -> str:
+    """The /check page: loads every slide in an iframe and measures it (inject/check.js)."""
+    cfg = json.dumps({"count": count, "base": "", "stage": {"width": stage[0], "height": stage[1]}})
+    js = (_INJECT_DIR / "check.js").read_text(encoding="utf-8")
+    return (
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>hs-check</title></head>"
+        f"<body><script>window.HS_CHECK={cfg}</script><script>{js}</script></body></html>"
+    )
+
+
 def inject_present_helper(page: str) -> str:
     """Return the page with the presenter helper appended to its body."""
     if _BODY_END_RE.search(page):
@@ -250,6 +262,13 @@ class DeckPreview:
         if self.entry:
             return len(split_sections(self._entry_text()))
         return len(self.slide_files())
+
+    def slide_names(self) -> list[str]:
+        """Display names in slide order, as the deck list reports them
+        (file names, or ``<entry>#<n>`` for a single-file deck)."""
+        if self.entry:
+            return [f"{self.entry}#{i + 1}" for i in range(self.slide_count())]
+        return [p.name for p in self.slide_files()]
 
     def _entry_text(self) -> str:
         path = self.deck_dir / (self.entry or "")
@@ -340,6 +359,8 @@ class DeckPreview:
         path = url.path
         if path == "/health":
             return _send(h, 200, b'{"status":"ok"}', "application/json")
+        if path == "/check":
+            return _send(h, 200, check_document(self.slide_count()).encode("utf-8"), "text/html; charset=utf-8")
         if path == "/print":
             return _send(h, 200, self.render_print().encode("utf-8"), "text/html; charset=utf-8")
         if path.startswith("/slide/"):

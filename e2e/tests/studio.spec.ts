@@ -509,3 +509,48 @@ test('pins are sent to the deck chat as a batch; agent reports flow back; questi
   const queue = await (await page.request.get(`/apps/html-studio/api/pins/queue?path=${encodeURIComponent(`${home}/decks/acme-quarterly`)}`)).json()
   expect(queue.batches).toHaveLength(1)
 })
+
+test('deck check: finds the known issues, Fix turns an issue into a pin, Pin all covers the rest', async ({ page }) => {
+  await openApp(page)
+  await addFixtureRoot(page)
+  await selectDeck(page, 'acme-messy')
+  await page.getByRole('button', { name: /^Check$/ }).click()
+  await expect(page.getByRole('button', { name: /Checking 2 slides/ })).toBeVisible()
+  const panel = page.getByTestId('check-panel')
+  await expect(panel).toBeVisible({ timeout: 60_000 })
+
+  const counts = async () => {
+    const chips = await panel.getByTestId('check-count').all()
+    const out: Record<string, string> = {}
+    for (const c of chips) out[(await c.getAttribute('data-rule'))!] = (await c.textContent())!
+    return out
+  }
+  const c = await counts()
+  expect(Object.keys(c).sort()).toEqual(['broken-image', 'em-dash', 'eyebrow', 'missing-cover', 'overlap'])
+  await expect(panel).toContainText('ACME | INTRO | 2026')
+  await expect(panel).toContainText('img/nope.png')
+  // every issue sits on slide 1; the clean slide reports nothing
+  const issues = panel.getByTestId('check-issue')
+  const n = await issues.count()
+  expect(n).toBeGreaterThanOrEqual(5)
+  await expect(panel.getByRole('button', { name: /^2\. 020_clean\.html$/ })).toHaveCount(0)
+
+  // Fix one issue: it becomes a pin with a prefilled comment and is marked handled.
+  const eyebrow = panel.locator('[data-testid="check-issue"][data-rule="eyebrow"]').first()
+  await eyebrow.getByRole('button', { name: /^Fix$/ }).click()
+  await expect(eyebrow).toHaveAttribute('data-pinned', 'true')
+  const pin = page.getByTestId('pin').first()
+  await expect(pin).toContainText('slides/010_intro.html')
+  await expect(pin).toContainText('p.eyebrow')
+  await expect(page.getByRole('textbox', { name: /Comment for pin 1/ })).toHaveValue(/Remove this eyebrow label/)
+  // Fixing the same issue again is a no-op.
+  await expect(eyebrow.getByRole('button')).toBeDisabled()
+
+  // Pin all: the remaining issues become pins; the check panel shows them all handled.
+  await panel.getByRole('button', { name: /^Pin all/ }).click()
+  await expect(page.getByTestId('pin')).toHaveCount(n)
+  await expect(panel.locator('[data-testid="check-issue"][data-pinned="false"]')).toHaveCount(0)
+  await expect(panel.getByRole('button', { name: /^Pin all/ })).toHaveCount(0)
+  const sendBtn = page.getByTestId('pins-send')
+  await expect(sendBtn).toBeEnabled() // every generated pin already has a comment
+})

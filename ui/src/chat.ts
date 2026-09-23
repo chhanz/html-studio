@@ -55,6 +55,7 @@ export function deckBrief({ deck, preview, build, language }: BriefInput): strin
     '- Edit the slide source files, never the built output.',
     '- Every slide is a 1280×720 stage; keep content inside it.',
     '- Speaker notes belong in notes/<slide>.md, never inside slide HTML.',
+    '- No em/en dashes and no eyebrow label lines (small uppercase text such as "ACME | INTRO" above a heading) in slide text.',
     '- The studio previews files as saved; no server restart is needed after edits.',
     ...(deck.hasDesignMd
       ? ['- Design rules: follow DESIGN.md in the deck folder (colours, type, spacing, radii). Its CSS variables live in tokens.css (--color-<name>, --font-sans, --space-<name>, --radius-<name>, --type-<name>-size/weight/leading/tracking); use them instead of hard-coded values.']

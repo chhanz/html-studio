@@ -35,6 +35,8 @@ export type Pin = Capture & {
   /** Set once sent: the batch and the comment id the agent reports with. */
   batchId?: string
   batchCid?: string
+  /** Set when the pin was created from a deck-check issue (so the check panel can show it as handled). */
+  issueKey?: string
   /** Agent reports (and the user's replies) for this pin. */
   thread?: { role: 'agent' | 'user'; text: string; ts: number | null }[]
 }

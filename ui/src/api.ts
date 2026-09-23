@@ -115,6 +115,8 @@ export function makeClient(api: AppApi) {
     pdfStart: (path: string) => wrap(api.post<PdfJob>(`${API}/pdf`, { path })),
     pdfStatus: (id: string) => wrap(api.get<PdfJob>(`${API}/pdf?id=${encodeURIComponent(id)}`)),
     reveal: (path: string, file: string) => wrap(api.post<{ revealed: string }>(`${API}/reveal`, { path, file })),
+    checkStart: (path: string) => wrap(api.post<CheckJob>(`${API}/check`, { path })),
+    checkStatus: (id: string) => wrap(api.get<CheckJob>(`${API}/check?id=${encodeURIComponent(id)}`)),
     pinsSend: (path: string, pins: unknown[], language: string) => wrap(api.post<BatchSent>(`${API}/pins/send`, { path, pins, language })),
     pinsQueue: (path: string) => wrap(api.get<{ batches: Batch[] }>(`${API}/pins/queue?path=${encodeURIComponent(path)}`)),
     pinsReply: (path: string, id: string, cid: string, text: string) => wrap(api.post<{ ok: true }>(`${API}/pins/reply`, { path, id, cid, text })),
@@ -157,3 +159,21 @@ export type BatchComment = {
 }
 export type Batch = { id: string; deck: string; deckPath: string; createdAt: number; state: 'sent' | 'done'; comments: BatchComment[] }
 export type BatchSent = { id: string; file: string; prompt: string; comments: BatchComment[] }
+
+export type CheckSeverity = 'error' | 'warning' | 'info'
+export type CheckIssue = {
+  rule: string
+  severity: CheckSeverity
+  slideIndex: number
+  slideFile: string
+  selector: string
+  tag: string
+  classes: string[]
+  text: string
+  rect: { x: number; y: number; w: number; h: number } | null
+  detail: string
+  src?: string | null
+  otherSelector?: string
+}
+export type CheckResult = { issues: CheckIssue[]; counts: Record<string, number>; slides: number; rules: Record<string, CheckSeverity>; disabled: string[] }
+export type CheckJob = { id: string; state: 'running' | 'done' | 'error'; result?: CheckResult; error?: string; detail?: string }

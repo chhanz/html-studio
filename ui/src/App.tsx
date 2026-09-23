@@ -1,9 +1,10 @@
 import { useAppApi } from '@kirocrew/app-sdk'
 import { Card, CardTitle, PageHeader } from '@kirocrew/app-sdk/ui'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ApiError, type BackendStatus, type BuildInfo, type BuildResult, type Deck, type DesignInfo, type PdfJob, type PreviewInfo, makeClient } from './api'
+import { ApiError, type BackendStatus, type BuildInfo, type BuildResult, type CheckIssue, type CheckJob, type CheckResult, type Deck, type DesignInfo, type PdfJob, type PreviewInfo, makeClient } from './api'
 import { openDeckChat } from './chat'
 import { BuildPanel } from './components/BuildPanel'
+import { CheckPanel, issueKey } from './components/CheckPanel'
 import { DeckChat } from './components/DeckChat'
 import { DeckPanel } from './components/DeckPanel'
 import { PinsPanel } from './components/PinsPanel'
@@ -300,6 +301,82 @@ export default function HtmlStudio() {
       }
     }
   }, [pins, selected, client])
+
+  // P2-5: deck check. One headless run over the deck; each issue can become a pin.
+  const [checkJob, setCheckJob] = useState<CheckJob | null>(null)
+  const [checkResult, setCheckResult] = useState<CheckResult | null>(null)
+  const [checkError, setCheckError] = useState<string | null>(null)
+  useEffect(() => {
+    setCheckJob(null)
+    setCheckResult(null)
+    setCheckError(null)
+  }, [selected?.path])
+  const runCheck = useCallback(async () => {
+    if (!selected || checkJob?.state === 'running') return
+    setCheckError(null)
+    setCheckResult(null)
+    try {
+      const job = await client.checkStart(selected.path)
+      setCheckJob(job)
+    } catch (e) {
+      setCheckError(e instanceof ApiError ? e.code : 'request_failed')
+    }
+  }, [client, selected, checkJob?.state])
+  useEffect(() => {
+    if (!checkJob || checkJob.state !== 'running') return
+    let alive = true
+    const id = setInterval(async () => {
+      try {
+        const st = await client.checkStatus(checkJob.id)
+        if (!alive) return
+        if (st.state === 'running') return
+        setCheckJob(st)
+        if (st.state === 'done' && st.result) setCheckResult(st.result)
+        else setCheckError(st.error ?? 'check_failed')
+      } catch (e) {
+        if (!alive) return
+        setCheckJob(null)
+        setCheckError(e instanceof ApiError ? e.code : 'request_failed')
+      }
+    }, 700)
+    return () => {
+      alive = false
+      clearInterval(id)
+    }
+  }, [client, checkJob?.id, checkJob?.state]) // eslint-disable-line react-hooks/exhaustive-deps
+  const pinnedIssues = useMemo(() => new Set(pins.map((p) => p.issueKey).filter((k): k is string => !!k)), [pins])
+  const fixIssue = useCallback(
+    (issue: CheckIssue) => {
+      if (!preview) return
+      const key = issueKey(issue)
+      const name = preview.slides[issue.slideIndex] ?? String(issue.slideIndex + 1)
+      const slideFile = selected?.kind === 'single' ? selected.entry ?? name : `${selected?.slidesDir ?? 'slides'}/${name}`
+      const cap: Capture = {
+        slideIndex: issue.slideIndex,
+        cid: null,
+        selector: issue.selector,
+        tag: issue.tag,
+        elementId: null,
+        classes: issue.classes,
+        text: issue.text,
+        rect: issue.rect ?? { x: 0, y: 0, w: 0, h: 0 },
+        src: issue.src ?? null,
+      }
+      const commentKey = `check.fixcomment.${issue.rule}`
+      const base = t(commentKey) === commentKey ? t(`check.rule.${issue.rule}`) : t(commentKey)
+      setPins((prev) => {
+        if (prev.some((p) => p.issueKey === key)) return prev
+        const nextIndex = prev.reduce((max, p) => Math.max(max, p.index), 0) + 1
+        const pin = newPin(cap, slideFile, nextIndex)
+        return [...prev, { ...pin, comment: issue.detail ? `${base} (${issue.detail})` : base, issueKey: key }]
+      })
+    },
+    [preview, selected?.kind, selected?.entry, selected?.slidesDir, t],
+  )
+  const fixAllIssues = useCallback(() => {
+    if (!checkResult) return
+    for (const i of checkResult.issues) if (!pinnedIssues.has(issueKey(i))) fixIssue(i)
+  }, [checkResult, pinnedIssues, fixIssue])
 
   // P1-8: DESIGN.md recognition. Read-only until the user asks for tokens.css.
   const [designInfo, setDesignInfo] = useState<DesignInfo | null>(null)
@@ -734,7 +811,15 @@ export default function HtmlStudio() {
               >
                 {t('toolbar.select')}
               </SmallBtn>
-              <SmallBtn disabled>{t('toolbar.check')}</SmallBtn>
+              <SmallBtn
+                onClick={() => void runCheck()}
+                disabled={!preview || checkJob?.state === 'running'}
+                title={t('check.hint')}
+                className="inline-flex items-center gap-1.5"
+              >
+                {checkJob?.state === 'running' && <Spinner />}
+                {checkJob?.state === 'running' && preview ? t('check.running', { n: preview.slides.length }) : t('toolbar.check')}
+              </SmallBtn>
               <SmallBtn onClick={present} disabled={!outputUrl} title={outputUrl ? t('present.hint') : t('present.need_output')}>
                 {t('toolbar.present')}
               </SmallBtn>
@@ -776,6 +861,26 @@ export default function HtmlStudio() {
             </div>
           )}
           {selected && designInfo && <ThemeRow t={t} info={designInfo} busy={tokensBusy} onWriteTokens={() => void writeTokens()} />}
+          {selected && checkError && (
+            <div className="mb-2 flex-none rounded-md border p-2 text-[12px]" style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }} role="alert">
+              {t('check.failed')}: {t(`error.${checkError}`) === `error.${checkError}` ? t('error.generic', { code: checkError }) : t(`error.${checkError}`)}
+              {checkJob?.detail ? <span className="block text-muted break-all">{checkJob.detail}</span> : null}
+            </div>
+          )}
+          {selected && checkResult && (
+            <CheckPanel
+              t={t}
+              result={checkResult}
+              pinned={pinnedIssues}
+              onJump={(i) => {
+                setCurrent(i)
+                setViewMode('slides')
+              }}
+              onFix={fixIssue}
+              onFixAll={fixAllIssues}
+              onClose={() => setCheckResult(null)}
+            />
+          )}
           {selected && (buildResult || pendingCommand) && (
             <div className="mb-2 flex-none overflow-y-auto" style={{ maxHeight: "40%" }}>
               <BuildPanel

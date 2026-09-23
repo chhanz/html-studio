@@ -49,6 +49,9 @@ Locate the element with `selector` inside the slide's `<section>`; confirm with
   comment asks for exactly that.
 - Speaker notes belong in `notes/<slide>.md`, never inside slide HTML.
 - Do not use em dashes or en dashes in slide text you write; use plain punctuation.
+- Do not add "eyebrow" lines: small uppercase label text above a heading such as
+  `ACME | INTRO | 2026` or `SECTION 01`. If a slide needs context, put it in the
+  heading or the body. When asked to remove one, fold any real meaning into the heading.
 
 ## Report after EACH comment
 

@@ -32,7 +32,11 @@ for (const t of ['bg-ok', 'bg-warn', 'bg-danger']) tokens.add(t)
 // never appear next to `className:`. Treat any quoted literal that looks like a
 // Tailwind utility (prefix-word, e.g. bg-x, text-x, border-x, w-x) as a class.
 const UTILITY = /^(bg|text|border|w|h|p|px|py|pt|pb|pl|pr|m|mx|my|mt|mb|ml|mr|gap|rounded|flex|grid|min|max|overflow|opacity|font|tracking|leading|shadow|ring|outline|hover:[a-z]+|focus:[a-z]+)-[a-z0-9[\]()/.%_-]+$/i
-for (const m of bundle.matchAll(/["']([a-z0-9[\]()/.%:_ -]{2,120})["']/gi)) {
+for (const m of bundle.matchAll(/["']([a-z0-9[\]()/.%:_ -]{2,120})["'](?<after>\s*:)?/gi)) {
+  if (m.groups?.after) continue // an object key such as "check.rule.inline-font-size":
+  // i18n message values (`"check.rule.x": "Inline font-size"`) are prose, not classes.
+  const before = bundle.slice(Math.max(0, m.index - 80), m.index)
+  if (/"[a-z0-9_.-]+\.[a-z0-9_.-]+":\s*$/i.test(before)) continue
   for (const t of m[1].split(/\s+/)) if (t && UTILITY.test(t)) tokens.add(t)
 }
 

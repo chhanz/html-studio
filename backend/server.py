@@ -34,14 +34,16 @@ import preview as preview_lib  # noqa: E402
 import build as build_lib  # noqa: E402
 import design as design_lib  # noqa: E402
 import pinqueue as queue_lib  # noqa: E402
+import check as check_lib  # noqa: E402
 import export as export_lib  # noqa: E402
 
 PDF_JOBS = export_lib.ExportJobs()
+CHECK_JOBS = check_lib.CheckJobs()
 
 PREVIEWS = preview_lib.PreviewRegistry()
 
 APP_NAME = os.environ.get("KIROCREW_APP_NAME", "html-studio")
-APP_VERSION = "0.1.14"
+APP_VERSION = "0.1.15"
 PORT = int(os.environ.get("PORT", "9100"))
 HOME = Path(os.environ.get("KIROCREW_HOME", str(Path.home() / ".kiro" / "crew")))
 DATA_DIR = HOME / "apps" / APP_NAME / "data"
@@ -370,6 +372,43 @@ def route_design_tokens(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
     return 200, _design_payload(deck)
 
 
+# --- deck check -------------------------------------------------------------
+def route_check_start(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
+    """POST /check {path}: run every rule over the deck (async; poll GET /check?id)."""
+    deck = _deck_under_roots(str(body.get("path", "")))
+    if deck is None:
+        return 400, {"error": "deck_not_allowed"}
+    browser = export_lib.find_browser()
+    if browser is None:
+        return 400, {"error": "no_browser"}
+    info = deck_lib.describe_deck(deck, deck)
+    if info is None:
+        return 409, {"error": "not_a_deck"}
+    p = PREVIEWS.ensure(deck, info["slidesDir"], _deck_css(deck), entry=info.get("entry"))
+    slides = list(p.slide_names())
+    disabled = check_lib.disabled_rules(deck_lib._read_studio(deck))
+    url = f"http://127.0.0.1:{p.port}/check"
+
+    def run() -> dict[str, Any]:
+        first = p.render_slide(0) or "" if slides else ""
+        issues = check_lib.static_issues(slides, check_lib.first_slide_classes(first))
+        rendered = check_lib.run_rendered(browser, url)
+        issues.extend(i for i in rendered.get("issues", []) if isinstance(i, dict))
+        return check_lib.finish(issues, slides, disabled)
+
+    job_id = CHECK_JOBS.start(run)
+    _log(f"check {job_id} started for {deck} ({len(slides)} slides)")
+    return 200, {"id": job_id, "state": "running"}
+
+
+def route_check_status(h: "Handler", _body: dict[str, Any]) -> tuple[int, Any]:
+    job_id = parse_qs(urlsplit(h.path).query).get("id", [""])[0]
+    rec = CHECK_JOBS.status(job_id)
+    if rec is None:
+        return 404, {"error": "unknown_job"}
+    return 200, rec
+
+
 # --- pins → agent (visual edit batches) -------------------------------------
 APP_DIR = Path(__file__).resolve().parent.parent
 QUEUE_DIR = DATA_DIR / "queue"
@@ -542,6 +581,8 @@ ROUTES: dict[tuple[str, str], Route] = {
     ("POST", "/build/info"): route_build_info,
     ("POST", "/build"): route_build,
     ("POST", "/present"): route_present,
+    ("POST", "/check"): route_check_start,
+    ("GET", "/check"): route_check_status,
     ("POST", "/pins/send"): route_pins_send,
     ("GET", "/pins/queue"): route_pins_queue,
     ("POST", "/pins/reply"): route_pins_reply,

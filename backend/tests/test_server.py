@@ -106,7 +106,7 @@ class ServerTest(unittest.TestCase):
         code, data = self.request("GET", "/api/status", signed=True)
         self.assertEqual(code, 200)
         self.assertEqual(data["app"], "html-studio")
-        self.assertEqual(data["version"], "0.1.14")
+        self.assertEqual(data["version"], "0.1.15")
         self.assertTrue(data["dataDir"].startswith(self.tmp.name))
 
     def test_signed_unknown_route_is_404(self) -> None:
@@ -273,6 +273,38 @@ class ServerTest(unittest.TestCase):
             self.assertEqual(qd["batches"], [])
             code, data = self.request("POST", "/api/pins/send", signed=True, body=json.dumps({"path": str(deck), "pins": []}).encode())
             self.assertEqual((code, data["error"]), (400, "no_pins"))
+            self.request("POST", "/api/roots/remove", signed=True, body=json.dumps({"path": root}).encode())
+
+    def test_check_job_runs_all_rules(self) -> None:
+        sys.path.insert(0, str(REPO / "backend"))
+        if not __import__("export").find_browser():
+            self.skipTest("no headless browser")
+        with tempfile.TemporaryDirectory(dir=Path.home()) as root:
+            deck = Path(root) / "deck"
+            (deck / "slides").mkdir(parents=True)
+            (deck / "slides" / "010.html").write_text("<section class='slide'><p class='eyebrow'>SECTION 01</p><h1>Hello \u2014 world</h1></section>")
+            (deck / "studio.json").write_text(json.dumps({"check": {"disable": ["eyebrow"]}}))
+            self.request("POST", "/api/roots/add", signed=True, body=json.dumps({"path": root}).encode())
+            code, data = self.request("POST", "/api/check", signed=True, body=json.dumps({"path": str(deck)}).encode())
+            self.assertEqual((code, data["state"]), (200, "running"))
+            for _ in range(200):
+                code, st = self.request("GET", f"/api/check?id={data['id']}", signed=True)
+                if st["state"] != "running":
+                    break
+                time.sleep(0.1)
+            self.assertEqual(st["state"], "done", st)
+            res = st["result"]
+            rules = [i["rule"] for i in res["issues"]]
+            self.assertIn("em-dash", rules)
+            self.assertIn("missing-cover", rules)
+            self.assertNotIn("eyebrow", rules)  # disabled via studio.json
+            self.assertEqual(res["disabled"], ["eyebrow"])
+            self.assertEqual(res["slides"], 1)
+            self.assertTrue(all(i["slideFile"] == "010.html" for i in res["issues"]))
+            self.assertEqual(res["counts"]["em-dash"], 1)
+            code, st = self.request("GET", "/api/check?id=nope", signed=True)
+            self.assertEqual((code, st["error"]), (404, "unknown_job"))
+            self.request("POST", "/api/preview/stop", signed=True, body=json.dumps({"path": str(deck)}).encode())
             self.request("POST", "/api/roots/remove", signed=True, body=json.dumps({"path": root}).encode())
 
     def test_present_and_pdf_require_output(self) -> None:
