@@ -748,7 +748,7 @@ test('present opens the presenter window in ANOTHER browser and stays in sync: s
   await other.close()
 })
 
-test('code view edits a slide: highlighted source, Cmd+S saves, preview and built output refresh, conflicts are caught', async ({ page }) => {
+test('code view edits a slide: highlighted source, Save writes, preview and built output refresh, conflicts are caught', async ({ page }) => {
   await openApp(page)
   await addFixtureRoot(page)
   await selectDeck(page, 'acme-quarterly')
@@ -784,15 +784,26 @@ test('code view edits a slide: highlighted source, Cmd+S saves, preview and buil
   await page.keyboard.press('Shift+Tab')
   await expect(ta).toHaveValue(/^<section/)
 
-  // Cmd+S saves: the viewer beside the editor shows the new heading, the file is written,
+  // Save: the viewer under the editor shows the new heading, the file is written,
   // and the built output was rebuilt with it.
-  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+s' : 'Control+s')
+  await editor.getByRole('button', { name: 'Save' }).click()
   await expect(editor).toContainText('Saved')
   await expect(page.getByTestId('code-view').frameLocator('iframe[title="020_agenda.html"]').locator('h2')).toHaveText('Plan for today')
   const onDisk = await (await page.request.get(`/__ctl/read?path=${encodeURIComponent(deckPath + '/slides/020_agenda.html')}`)).text()
   expect(onDisk).toContain('<h2>Plan for today</h2>')
   const built = await (await page.request.get(`/__ctl/read?path=${encodeURIComponent(deckPath + '/out/index.html')}`)).text()
   expect(built).toContain('Plan for today')
+
+  // The editor sits above the preview; dragging the handle changes the split and it is remembered.
+  const handle = page.getByTestId('code-split-handle')
+  const before = (await editor.boundingBox())!.height
+  const hb = (await handle.boundingBox())!
+  await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2 - 60, { steps: 5 })
+  await page.mouse.up()
+  expect((await editor.boundingBox())!.height).toBeLessThan(before - 30)
+  expect(Number(await page.evaluate(() => localStorage.getItem('hs.codeRatio')))).toBeLessThan(0.55)
 
   // A draft survives switching slides and coming back.
   await ta.fill(original.replace('<h2>Agenda · 안건</h2>', '<h2>Draft heading</h2>'))

@@ -146,13 +146,9 @@ export function CodeEditor({ t, client, deckPath, slide, slideNumber, drafts, re
     [client, deckPath, slide, source, drafts, onSaved],
   )
 
-  // Cmd/Ctrl+S saves; Tab indents (two spaces) instead of leaving the field.
+  // Tab indents (two spaces) instead of leaving the field. There is no save
+  // shortcut: the dashboard shell owns Cmd/Ctrl+S, so the button is the way.
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
-      e.preventDefault()
-      if (status === 'dirty' || conflict) void save()
-      return
-    }
     if (e.key === 'Tab' && !e.metaKey && !e.ctrlKey && !e.altKey) {
       e.preventDefault()
       const ta = e.currentTarget
@@ -201,7 +197,7 @@ export function CodeEditor({ t, client, deckPath, slide, slideNumber, drafts, re
     : ''
 
   return (
-    <div className="flex flex-col min-h-0 h-full" data-testid="code-editor">
+    <div className="flex flex-col min-h-0 flex-1" data-testid="code-editor">
       <div className="flex items-center gap-2 mb-1 flex-none text-[12px]">
         <span className="font-medium truncate">
           {t('code.title', { n: slideNumber })}
