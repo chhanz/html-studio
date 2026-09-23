@@ -57,7 +57,7 @@ export function deckBrief({ deck, preview, build, language }: BriefInput): strin
     '- Speaker notes belong in notes/<slide>.md, never inside slide HTML.',
     '- The studio previews files as saved; no server restart is needed after edits.',
     ...(deck.hasDesignMd
-      ? ['- Design rules: follow DESIGN.md in the deck folder (colours, type, spacing, radii). Its CSS variables live in tokens.css (--color-*, --font-sans, --space-*, --radius-*, --type-*); use them instead of hard-coded values.']
+      ? ['- Design rules: follow DESIGN.md in the deck folder (colours, type, spacing, radii). Its CSS variables live in tokens.css (--color-<name>, --font-sans, --space-<name>, --radius-<name>, --type-<name>-size/weight/leading/tracking); use them instead of hard-coded values.']
       : []),
     `- Answer in ${lang} throughout this session unless the user switches language.`,
     '',

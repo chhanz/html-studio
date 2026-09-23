@@ -74,6 +74,18 @@ export default function HtmlStudio() {
   const [pendingCommand, setPendingCommand] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
   const [viewMode, setViewMode] = useState<'slides' | 'output'>('slides')
+  // Output view: the frame follows `current` through its hash (src={url#N}); the
+  // built-in runtime also reports its own navigation back, so the strip follows.
+  const outputFrameRef = useRef<HTMLIFrameElement>(null)
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      const m = e.data as { type?: string; index?: number } | null
+      if (!m || m.type !== 'hs-slide' || typeof m.index !== 'number') return
+      if (e.source === outputFrameRef.current?.contentWindow) setCurrent(m.index)
+    }
+    window.addEventListener('message', onMsg)
+    return () => window.removeEventListener('message', onMsg)
+  }, [])
 
   useEffect(() => {
     setBuildResult(null)
@@ -625,7 +637,8 @@ export default function HtmlStudio() {
                 >
                   <iframe
                     key={reloadKey}
-                    src={outputUrl}
+                    ref={outputFrameRef}
+                    src={`${outputUrl}#${current + 1}`}
                     title={buildInfo?.output ?? 'output'}
                     sandbox="allow-scripts allow-same-origin"
                     className="w-full h-full border-0"

@@ -131,8 +131,20 @@ test('builds a slides deck with the built-in assembler and shows the output', as
   expect(html).toContain('Acme Quarterly Review')
   expect(html).toContain('hs-counter')
 
+  // Output view follows the thumbnail strip (regression: clicking a thumbnail did nothing here) ...
+  const outFrame = page.frameLocator('iframe[title="out/index.html"]')
+  await expect(outFrame.locator('#hs-counter')).toHaveText('1 / 4')
+  await page.locator('#slides-body li').nth(2).click()
+  await expect(outFrame.locator('#hs-counter')).toHaveText('3 / 4')
+  await expect(outFrame.locator('.slide.active')).toContainText('Uptime')
+  // ... and the strip follows navigation inside the built deck.
+  await outFrame.locator('.slide.active').click()
+  await page.keyboard.press('ArrowRight')
+  await expect(outFrame.locator('#hs-counter')).toHaveText('4 / 4')
+  await expect(page.locator('#slides-body li').nth(3).getByRole('button')).toHaveAttribute('aria-current', 'true')
+
   await toggle.getByRole('button', { name: /^Slides$/ }).click()
-  await expect(page.getByText('1 / 4')).toBeVisible()
+  await expect(page.getByText('4 / 4')).toBeVisible()
 })
 
 test('single-file deck: previews sections, build is disabled with a hint', async ({ page }) => {
