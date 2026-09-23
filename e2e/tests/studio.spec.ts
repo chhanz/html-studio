@@ -842,6 +842,7 @@ test('strip arranges slides: add, duplicate, drag to reorder, archive and restor
   // Add after slide 2: a blank slide appears as slide 3 and becomes current; later slides are renumbered.
   await items.nth(1).locator('> button').click()
   await page.getByTestId('strip-add').click()
+  await page.getByRole('dialog', { name: 'Add a slide' }).getByRole('button', { name: 'Insert Blank' }).click()
   await expect(items).toHaveCount(5)
   expect(await names()).toEqual(['010_cover.html', '020_agenda.html', '030_new.html', '040_uptime.html', '050_roadmap.html'])
   await expect(page.locator('#slides-body [aria-current="true"]')).toContainText('030_new.html')
@@ -892,4 +893,55 @@ test('strip arranges slides: add, duplicate, drag to reorder, archive and restor
   expect(await names()).toEqual(['010_agenda.html', '020_cover.html', '030_agenda-copy.html', '040_uptime.html', '050_roadmap.html', '060_new.html'])
   await expect(box).toHaveCount(0)
   await expect(page.locator('#slides-body [aria-current="true"]')).toContainText('060_new.html')
+})
+
+test('layout library: pick a built-in layout rendered in the deck style, save a slide as my layout, insert it, delete it', async ({ page }) => {
+  await openApp(page)
+  await addFixtureRoot(page)
+  await selectDeck(page, 'acme-quarterly')
+  const home = await fakeHome(page)
+  const deckPath = `${home}/decks/acme-quarterly`
+  const items = page.locator('#slides-body ol > li')
+  await expect(items).toHaveCount(4)
+  const names = () => items.locator('> button').evaluateAll((els) => els.map((e) => e.getAttribute('title')))
+
+  // Open the picker from slide 1: eight built-ins, thumbnails come from the preview server's /layout pages.
+  await items.nth(0).locator('> button').click()
+  await page.getByTestId('strip-add').click()
+  const dialog = page.getByRole('dialog', { name: 'Add a slide' })
+  await expect(dialog.getByTestId('layout-card')).toHaveCount(8)
+  await expect(dialog.locator('[data-layout="kpi"] iframe')).toHaveAttribute('src', /\/layout\/kpi$/)
+  await expect(dialog.frameLocator('[data-layout="kpi"] iframe').locator('h2')).toHaveText('Key numbers')
+  await expect(dialog).toContainText('None yet')
+  await dialog.getByRole('button', { name: 'Insert Key numbers' }).click()
+  await expect(dialog).toHaveCount(0)
+  await expect(items).toHaveCount(5)
+  expect(await names()).toEqual(['010_cover.html', '020_kpi.html', '030_agenda.html', '040_uptime.html', '050_roadmap.html'])
+  await expect(page.locator('#slides-body [aria-current="true"]')).toContainText('020_kpi.html')
+  await expect(page.frameLocator('[data-testid="slide-stage"] iframe').locator('h2')).toHaveText('Key numbers')
+
+  // Save the agenda as my layout.
+  await items.nth(2).locator('> button').click()
+  await page.getByRole('button', { name: 'Slide actions' }).click()
+  await page.getByRole('menuitem', { name: 'Save as layout' }).click()
+  const saveDialog = page.getByRole('dialog', { name: 'Save as layout' })
+  await saveDialog.getByLabel('Layout name').fill('Acme agenda')
+  await saveDialog.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(saveDialog.getByRole('status')).toContainText('Saved as Acme agenda')
+  await expect(saveDialog.locator('[data-layout="my-acme-agenda"]')).toBeVisible()
+  await saveDialog.getByRole('button', { name: 'Close' }).click()
+
+  // It is offered in the picker (for every deck); insert it after the last slide, then delete it.
+  await items.nth(4).locator('> button').click()
+  await page.getByTestId('strip-add').click()
+  await expect(dialog.getByTestId('layout-card')).toHaveCount(9)
+  await dialog.getByRole('button', { name: 'Insert Acme agenda' }).click()
+  await expect(items).toHaveCount(6)
+  expect((await names())[5]).toBe('060_acme-agenda.html')
+  const added = await (await page.request.get(`/__ctl/read?path=${encodeURIComponent(deckPath + '/slides/060_acme-agenda.html')}`)).text()
+  expect(added).toContain('Agenda')
+  await page.getByTestId('strip-add').click()
+  await dialog.getByRole('button', { name: 'Delete layout Acme agenda' }).click()
+  await expect(dialog.getByTestId('layout-card')).toHaveCount(8)
+  await dialog.getByRole('button', { name: 'Close' }).click()
 })

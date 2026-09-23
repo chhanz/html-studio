@@ -37,6 +37,7 @@ import pinqueue as queue_lib  # noqa: E402
 import check as check_lib  # noqa: E402
 import source as source_lib  # noqa: E402
 import arrange as arrange_lib  # noqa: E402
+import layouts as layouts_lib  # noqa: E402
 import notes as notes_lib  # noqa: E402
 import export as export_lib  # noqa: E402
 
@@ -46,10 +47,20 @@ CHECK_JOBS = check_lib.CheckJobs()
 PREVIEWS = preview_lib.PreviewRegistry()
 
 APP_NAME = os.environ.get("KIROCREW_APP_NAME", "html-studio")
-APP_VERSION = "0.1.24"
+APP_VERSION = "0.1.25"
 PORT = int(os.environ.get("PORT", "9100"))
 HOME = Path(os.environ.get("KIROCREW_HOME", str(Path.home() / ".kiro" / "crew")))
 DATA_DIR = HOME / "apps" / APP_NAME / "data"
+
+
+def _resolve_layout(layout_id: str) -> str | None:
+    try:
+        return layouts_lib.read_layout(DATA_DIR, layout_id)
+    except layouts_lib.LayoutError:
+        return None
+
+
+preview_lib.LAYOUT_RESOLVER = _resolve_layout
 
 _PROXY_HEADER = "X-KiroCrew-Proxy"
 _MAX_SKEW_SECONDS = 60
@@ -519,11 +530,53 @@ def route_slides_reorder(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]
 
 
 def route_slides_add(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
-    """POST /slides/add {path, after?, duplicate?}: a new (or copied) slide after ``after``."""
+    """POST /slides/add {path, after?, duplicate?, layout?}: a new slide after ``after``,
+    copied from it, from a layout of the library, or blank."""
     after = body.get("after")
     if after is not None and not isinstance(after, str):
         return 400, {"error": "unknown_slide"}
-    return _arrange(body, lambda deck, info: {"name": arrange_lib.add(deck, info["slidesDir"], info.get("entry"), after, bool(body.get("duplicate")))})
+    layout = body.get("layout")
+    content = stem = None
+    if isinstance(layout, str) and layout and layout != "blank":
+        try:
+            content = layouts_lib.read_layout(DATA_DIR, layout)
+        except layouts_lib.LayoutError as exc:
+            return 404, {"error": exc.code}
+        stem = layout[len(layouts_lib.USER_PREFIX):] if layout.startswith(layouts_lib.USER_PREFIX) else layout
+    return _arrange(body, lambda deck, info: {"name": arrange_lib.add(deck, info["slidesDir"], info.get("entry"), after, bool(body.get("duplicate")), content, stem)})
+
+
+# --- layout library ---------------------------------------------------------
+def route_layouts_list(_h: "Handler", _body: dict[str, Any]) -> tuple[int, Any]:
+    """GET /layouts: built-in layouts, then the user's own."""
+    return 200, {"items": layouts_lib.list_layouts(DATA_DIR)}
+
+
+def route_layouts_save(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
+    """POST /layouts {path, slide, name}: save a slide's source as a user layout."""
+    deck = _deck_under_roots(str(body.get("path", "")))
+    if deck is None:
+        return 400, {"error": "deck_not_allowed"}
+    info = deck_lib.describe_deck(deck, deck)
+    if info is None:
+        return 404, {"error": "not_a_deck"}
+    try:
+        src = source_lib.read_source(deck, info["slidesDir"], info.get("entry"), str(body.get("slide", "")))
+    except source_lib.SourceError as exc:
+        return 404, {"error": exc.code}
+    try:
+        return 200, layouts_lib.save_layout(DATA_DIR, str(body.get("name", "")), src["text"])
+    except layouts_lib.LayoutError as exc:
+        return 400, {"error": exc.code}
+
+
+def route_layouts_delete(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
+    """POST /layouts/delete {id}: remove a user layout."""
+    try:
+        layouts_lib.delete_layout(DATA_DIR, str(body.get("id", "")))
+    except layouts_lib.LayoutError as exc:
+        return 404, {"error": exc.code}
+    return 200, {"ok": True}
 
 
 def route_slides_archive(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
@@ -774,6 +827,9 @@ ROUTES: dict[tuple[str, str], Route] = {
     ("POST", "/slides/archive"): route_slides_archive,
     ("POST", "/slides/restore"): route_slides_restore,
     ("GET", "/slides/archive"): route_slides_archive_list,
+    ("GET", "/layouts"): route_layouts_list,
+    ("POST", "/layouts"): route_layouts_save,
+    ("POST", "/layouts/delete"): route_layouts_delete,
     ("POST", "/check"): route_check_start,
     ("GET", "/check"): route_check_status,
     ("POST", "/pins/send"): route_pins_send,

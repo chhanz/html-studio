@@ -14,6 +14,7 @@ import { Presenter } from './components/Presenter'
 import { QuickChips } from './components/QuickChips'
 import { Section, useCollapsed } from './components/Section'
 import { SlideStrip, type ArrangeActions } from './components/SlideStrip'
+import { LayoutPicker } from './components/LayoutPicker'
 import { SlideViewer } from './components/SlideViewer'
 import { SmallBtn } from './components/SmallBtn'
 import { ThemeRow } from './components/ThemeRow'
@@ -473,11 +474,19 @@ export default function HtmlStudio() {
     },
     [applyArranged],
   )
+  // P3-3: layout picker (insert a template after a slide / save a slide as a template).
+  const [picker, setPicker] = useState<{ mode: 'insert' | 'save'; after: string | null; slide?: string } | null>(null)
+  useEffect(() => {
+    setPicker(null)
+  }, [selected?.path])
   const arrangeActions = useMemo<ArrangeActions | undefined>(
     () =>
       selected
         ? {
             busy: arrangeBusy,
+            onAdd: (after) => setPicker({ mode: 'insert', after }),
+            onDuplicate: (slide) => void runArrange(() => client.slidesAdd(selected.path, slide, true)),
+            onSaveLayout: (slide) => setPicker({ mode: 'save', after: slide, slide }),
             onReorder: (order) => {
               const focus = preview?.slides[current]
               const at = focus ? order.indexOf(focus) : -1
@@ -486,7 +495,6 @@ export default function HtmlStudio() {
                 return { ...res, name: at >= 0 ? res.slides[at] : undefined }
               })
             },
-            onAdd: (after, duplicate) => void runArrange(() => client.slidesAdd(selected.path, after, duplicate)),
             onArchive: (slide) => void runArrange(() => client.slidesArchive(selected.path, slide), false),
           }
         : undefined,
@@ -1182,6 +1190,24 @@ export default function HtmlStudio() {
           </div>
         </Card>
         </div>
+
+        {picker && selected && preview && (
+          <LayoutPicker
+            t={t}
+            client={client}
+            preview={preview}
+            mode={picker.mode}
+            after={picker.after}
+            saveSlide={picker.slide}
+            deckPath={selected.path}
+            busy={arrangeBusy}
+            onClose={() => setPicker(null)}
+            onPick={(layoutId, after) => {
+              setPicker(null)
+              void runArrange(() => client.slidesAdd(selected.path, after, false, layoutId))
+            }}
+          />
+        )}
 
         {/* Speaker notes for the current slide (P3-5) */}
         {selected && preview && preview.slides[current] && (

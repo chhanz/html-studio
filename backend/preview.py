@@ -13,6 +13,7 @@ Routes (all GET):
   /presenter?lang=           the presenter window (notes, next slide, timer, pen)
   /present/state             shared presenter state (GET/POST, loopback CORS)
   /present/events            the same state pushed as Server-Sent Events
+  /layout/<id>               a layout template wrapped like a slide (thumbnails in the picker)
   /note?slide=               speaker note text for the presenter window
   /assets/<path>, /img/<path>, /out/<path>
                              static files from the deck folder (contained)
@@ -30,7 +31,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import parse_qs, unquote, urlsplit
 
 import notes as notes_lib
@@ -216,6 +217,12 @@ def inject_present_helper(page: str) -> str:
     if _BODY_END_RE.search(page):
         return _BODY_END_RE.sub(lambda _m: PRESENT_HELPER_JS + "</body>", page, count=1)
     return page + PRESENT_HELPER_JS
+
+
+# Set by the app server: layout id -> slide HTML (None when unknown). Preview
+# servers stay deck-only otherwise; layouts are the one thing they show from
+# outside the deck, with the deck's own stylesheet.
+LAYOUT_RESOLVER: "Callable[[str], str | None] | None" = None
 
 
 class PresentState:
@@ -570,6 +577,11 @@ class DeckPreview:
             return _send(h, 200, json.dumps(self.present.snapshot()).encode("utf-8"), "application/json", cors=_cors_origin(h))
         if path == "/present/events":
             return self._present_events(h)
+        if path.startswith("/layout/"):
+            html_src = LAYOUT_RESOLVER(path[len("/layout/"):]) if LAYOUT_RESOLVER else None
+            if html_src is None:
+                return _send(h, 404, b"no such layout", "text/plain")
+            return _send(h, 200, wrap_slide(html_src, css_href=self._css_href(), title="layout", page_number=0).encode("utf-8"), "text/html; charset=utf-8")
         if path == "/presenter":
             lang = parse_qs(url.query).get("lang", ["en"])[0][:5]
             return _send(h, 200, self.presenter_page(lang).encode("utf-8"), "text/html; charset=utf-8")

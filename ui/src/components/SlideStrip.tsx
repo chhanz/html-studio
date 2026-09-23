@@ -7,8 +7,11 @@ type T = (key: string, vars?: Record<string, string | number>) => string
 
 export type ArrangeActions = {
   onReorder: (order: string[]) => void
-  onAdd: (after: string | null, duplicate: boolean) => void
+  /** Open the layout picker to insert after ``after``. */
+  onAdd: (after: string | null) => void
+  onDuplicate: (slide: string) => void
   onArchive: (slide: string) => void
+  onSaveLayout: (slide: string) => void
   busy: boolean
 }
 
@@ -76,7 +79,7 @@ export function SlideStrip({ t, preview, current, onSelect, reloadKey, withNotes
       {arrange && (
         <button
           type="button"
-          onClick={() => arrange.onAdd(preview.slides[current] ?? null, false)}
+          onClick={() => arrange.onAdd(preview.slides[current] ?? null)}
           disabled={disabled}
           className="w-full rounded-md py-1 text-[12px] cursor-pointer bg-transparent text-muted hover:text-text"
           style={{ border: '1px dashed var(--border)' }}
@@ -173,7 +176,8 @@ export function SlideStrip({ t, preview, current, onSelect, reloadKey, withNotes
                         [
                           ['strip.move_up', () => move(i, i - 1), i === 0],
                           ['strip.move_down', () => move(i, i + 1), i >= preview.slides.length - 1],
-                          ['strip.duplicate', () => arrange.onAdd(name, true), false],
+                          ['strip.duplicate', () => arrange.onDuplicate(name), false],
+                          ['strip.save_layout', () => arrange.onSaveLayout(name), false],
                           ['strip.archive', () => arrange.onArchive(name), preview.slides.length <= 1],
                         ] as [string, () => void, boolean][]
                       ).map(([key, run, off]) => (

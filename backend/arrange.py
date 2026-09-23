@@ -151,8 +151,11 @@ def reorder(deck: Path, slides_dir: str, entry: str | None, order: list[str]) ->
     return _rename_all(deck, slides_dir, order)
 
 
-def add(deck: Path, slides_dir: str, entry: str | None, after: str | None, duplicate: bool = False) -> str:
-    """Insert a new slide after ``after`` (None = at the end); ``duplicate`` copies ``after``. Returns its name."""
+def add(deck: Path, slides_dir: str, entry: str | None, after: str | None, duplicate: bool = False, content: str | None = None, stem: str | None = None) -> str:
+    """Insert a new slide after ``after`` (None = at the end). ``duplicate`` copies ``after``;
+    otherwise ``content`` (a layout) or the blank slide is used, named ``stem`` (default 'new'). Returns its name."""
+    if content is not None and len(_sections(content)) != 1:
+        raise ArrangeError("not_one_section")
     if entry:
         path = deck / entry
         doc = path.read_text(encoding="utf-8", errors="replace")
@@ -163,7 +166,7 @@ def add(deck: Path, slides_dir: str, entry: str | None, after: str | None, dupli
         if not spans:
             raise ArrangeError("no_sections")
         a, b = spans[pos_idx]
-        block = doc[a:b] if duplicate else NEW_SLIDE.rstrip("\n")
+        block = doc[a:b] if duplicate else (content if content is not None else NEW_SLIDE).strip("\n")
         _write(path, doc[:b] + "\n" + block + doc[b:])
         mapping: list[int | None] = list(range(pos_idx + 1)) + [None] + list(range(pos_idx + 1, len(spans)))
         _renumber_single_notes(deck, entry, mapping, len(spans))
@@ -173,8 +176,12 @@ def add(deck: Path, slides_dir: str, entry: str | None, after: str | None, dupli
     if after is not None and after not in names:
         raise ArrangeError("unknown_slide")
     pos = len(names) if after is None else names.index(after) + 1
-    content = (deck / slides_dir / after).read_text(encoding="utf-8", errors="replace") if duplicate and after else NEW_SLIDE
-    rest = _stem_after_prefix(after).replace(".html", "-copy.html") if duplicate and after else "new.html"
+    if duplicate and after:
+        content = (deck / slides_dir / after).read_text(encoding="utf-8", errors="replace")
+        rest = _stem_after_prefix(after).replace(".html", "-copy.html")
+    else:
+        content = content if content is not None else NEW_SLIDE
+        rest = f"{re.sub(r'[^a-z0-9-]+', '-', (stem or 'new').lower()).strip('-') or 'new'}.html"
     (deck / slides_dir).mkdir(parents=True, exist_ok=True)
     staged = STAGE + rest
     _write(deck / slides_dir / staged, content)

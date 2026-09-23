@@ -107,7 +107,7 @@ class ServerTest(unittest.TestCase):
         code, data = self.request("GET", "/api/status", signed=True)
         self.assertEqual(code, 200)
         self.assertEqual(data["app"], "html-studio")
-        self.assertEqual(data["version"], "0.1.24")
+        self.assertEqual(data["version"], "0.1.25")
         self.assertTrue(data["dataDir"].startswith(self.tmp.name))
 
     def test_signed_unknown_route_is_404(self) -> None:
@@ -337,6 +337,43 @@ class ServerTest(unittest.TestCase):
             self.assertIn("New slide", (deck / built["output"]).read_text())
             code, data = post("restore", {"name": "../x.html"})
             self.assertEqual((code, data["error"]), (404, "unknown_archive"))
+
+    def test_layout_routes(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.home()) as root:
+            deck = Path(root) / "deck"
+            (deck / "slides").mkdir(parents=True)
+            (deck / "slides" / "010_a.html").write_text("<section class='slide'><h1>Mine</h1><p>kept</p></section>")
+            self.request("POST", "/api/roots/add", signed=True, body=json.dumps({"path": root}).encode())
+            code, data = self.request("GET", "/api/layouts", signed=True)
+            self.assertEqual(code, 200)
+            self.assertEqual([i["id"] for i in data["items"]][:3], ["blank", "cover", "agenda"])
+            # Add from a built-in layout: the file is named after it and holds its markup.
+            code, data = self.request("POST", "/api/slides/add", signed=True, body=json.dumps({"path": str(deck), "after": "010_a.html", "layout": "kpi"}).encode())
+            self.assertEqual((code, data["name"]), (200, "020_kpi.html"))
+            self.assertIn("Key numbers", (deck / "slides" / "020_kpi.html").read_text())
+            code, data = self.request("POST", "/api/slides/add", signed=True, body=json.dumps({"path": str(deck), "after": None, "layout": "nope"}).encode())
+            self.assertEqual((code, data["error"]), (404, "unknown_layout"))
+            # Save the first slide as a user layout, see it in the list, add from it, delete it.
+            code, saved = self.request("POST", "/api/layouts", signed=True, body=json.dumps({"path": str(deck), "slide": "010_a.html", "name": "My opener"}).encode())
+            self.assertEqual((code, saved["id"], saved["builtin"]), (200, "my-my-opener", False))
+            code, data = self.request("GET", "/api/layouts", signed=True)
+            self.assertIn("my-my-opener", [i["id"] for i in data["items"]])
+            code, data = self.request("POST", "/api/slides/add", signed=True, body=json.dumps({"path": str(deck), "after": None, "layout": "my-my-opener"}).encode())
+            self.assertEqual((code, data["name"]), (200, "030_my-opener.html"))
+            self.assertIn("<p>kept</p>", (deck / "slides" / "030_my-opener.html").read_text())
+            # The preview server renders layouts with the deck's stylesheet for thumbnails.
+            code, pv = self.request("POST", "/api/preview/start", signed=True, body=json.dumps({"path": str(deck)}).encode())
+            page = urllib.request.urlopen(f"{pv['baseUrl']}/layout/my-my-opener").read().decode()
+            self.assertIn("<h1>Mine</h1>", page)
+            with self.assertRaises(urllib.error.HTTPError):
+                urllib.request.urlopen(f"{pv['baseUrl']}/layout/nope")
+            code, data = self.request("POST", "/api/layouts/delete", signed=True, body=json.dumps({"id": "my-my-opener"}).encode())
+            self.assertEqual(code, 200)
+            code, data = self.request("POST", "/api/layouts/delete", signed=True, body=json.dumps({"id": "cover"}).encode())
+            self.assertEqual((code, data["error"]), (404, "unknown_layout"))
+            # This test runs before test_roots_and_decks_flow (alphabetical), which expects no roots.
+            self.request("POST", "/api/preview/stop", signed=True, body=json.dumps({"path": str(deck)}).encode())
+            self.request("POST", "/api/roots/remove", signed=True, body=json.dumps({"path": root}).encode())
 
     def test_notes_round_trip_and_orphans(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.home()) as root:
