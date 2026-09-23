@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import sys
 import tempfile
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -308,6 +309,45 @@ class PresentHelperTests(unittest.TestCase):
                 self.assertIsNone(r.headers.get("Access-Control-Allow-Origin"))
                 r = urllib.request.urlopen(urllib.request.Request(base, method="OPTIONS", headers={"Origin": "http://localhost:9"}))
                 self.assertEqual((r.status, r.headers.get("Access-Control-Allow-Methods")), (204, "GET, POST, OPTIONS"))
+            finally:
+                p.stop()
+
+    def test_present_events_stream_pushes_changes(self) -> None:
+        import threading
+
+        with tempfile.TemporaryDirectory() as tmp:
+            deck = Path(tmp) / "deck"
+            (deck / "slides").mkdir(parents=True)
+            (deck / "slides" / "010.html").write_text("<section class='slide'>x</section>")
+            p = preview.DeckPreview(deck, "slides", None)
+            port = p.start()
+            base = f"http://127.0.0.1:{port}"
+            try:
+                got: list[dict] = []
+                resp = urllib.request.urlopen(urllib.request.Request(f"{base}/present/events", headers={"Origin": "http://127.0.0.1:1"}))
+                self.assertEqual(resp.headers.get("Content-Type"), "text/event-stream")
+                self.assertEqual(resp.headers.get("Access-Control-Allow-Origin"), "http://127.0.0.1:1")
+
+                def reader() -> None:
+                    for raw in resp:
+                        line = raw.decode().strip()
+                        if line.startswith("data: "):
+                            got.append(json.loads(line[6:]))
+                            if len(got) >= 3:
+                                break
+
+                th = threading.Thread(target=reader, daemon=True)
+                th.start()
+                time.sleep(0.2)
+                for body in ({"from": "presenter", "index": 2}, {"from": "presenter", "laser": {"on": True, "x": 5, "y": 6}}):
+                    req = urllib.request.Request(f"{base}/present/state", data=json.dumps(body).encode(), method="POST", headers={"Content-Type": "application/json"})
+                    urllib.request.urlopen(req).read()
+                    time.sleep(0.05)
+                th.join(timeout=3)
+                resp.close()
+                self.assertEqual([g["seq"] for g in got], [0, 1, 2])
+                self.assertEqual(got[1]["index"], 2)
+                self.assertEqual(got[2]["laser"], {"on": True, "x": 5, "y": 6})
             finally:
                 p.stop()
 

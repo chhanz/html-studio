@@ -163,13 +163,24 @@
 
   // --- laser: direct to the audience over the channel, throttled by frame -----
   var pending = null, flag = document.getElementById('laser-flag')
-  var lastPost = 0
+  // Laser points go to the state server as fast as the pointer moves, but with
+  // ONE request in flight at a time: while a request is out, the newest point
+  // replaces the queued one (coalescing), so the show never lags behind a queue.
+  var laserBusy = false, laserQueued = null
+  function pushLaser(l) {
+    if (laserBusy) { laserQueued = l; return }
+    laserBusy = true
+    fetch(STATE, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: 'presenter', laser: l }) })
+      .catch(function () {})
+      .then(function () {
+        laserBusy = false
+        if (laserQueued) { var q = laserQueued; laserQueued = null; pushLaser(q) }
+      })
+  }
   function flush() {
     if (!pending) return
     channel.postMessage({ from: 'presenter', type: 'laser', x: pending.x, y: pending.y, on: pending.on })
-    // The studio's own presentation view (another browser process) reads the laser from the state server.
-    var now = Date.now()
-    if (!pending.on || now - lastPost > 33) { lastPost = now; post({ laser: { on: pending.on, x: pending.x, y: pending.y } }) }
+    pushLaser({ on: pending.on, x: pending.x, y: pending.y })
     pending = null
   }
   document.getElementById('cur-fit').addEventListener('mousemove', function (e) {
@@ -199,13 +210,18 @@
     else if (m.type === 'bye') { seen = 0 }
   }
   channel.postMessage({ from: 'presenter', type: 'ping' })
+  // Push from the server (SSE) for the show's moves; a slow poll remains for presence.
+  try {
+    var es = new EventSource('/present/events')
+    es.onmessage = function (e) { if (inflight > 0) return; try { applyState(JSON.parse(e.data)) } catch (_e) {} }
+  } catch (_e) {}
   setInterval(function () {
     if (inflight > 0) return
     fetch(STATE).then(function (r) { return r.json() }).then(function (st) {
       applyState(st)
       if (Date.now() - seen > 6000) { presence.classList.remove('on'); presence.lastElementChild.textContent = t('audience_none') }
     }).catch(function () {})
-  }, 250)
+  }, 1000)
   setInterval(function () {
     channel.postMessage({ from: 'presenter', type: 'ping' })
     post({})

@@ -169,10 +169,7 @@ export function Presenter({ t, url, baseUrl, startSlide, slideCount, onClose, op
       dot.style.top = `${(cur.y / 720) * r.height}px`
       if (Math.abs(tgt.x - cur.x) + Math.abs(tgt.y - cur.y) > 0.3) raf = requestAnimationFrame(step)
     }
-    const tick = async () => {
-      if (!ready || inflight.current > 0) return
-      try {
-        const st = (await (await fetch(stateUrl)).json()) as PresentStateWire
+    const apply = (st: PresentStateWire) => {
         if (!alive) return
         setPresenterOn(st.presenter)
         if (st.seq === seqRef.current) return
@@ -192,15 +189,38 @@ export function Presenter({ t, url, baseUrl, startSlide, slideCount, onClose, op
         if (!laserTarget.current.on && l.on) Object.assign(cur, { x: l.x, y: l.y })
         laserTarget.current = { on: !!l.on, x: l.x, y: l.y }
         if (!raf) raf = requestAnimationFrame(step)
+    }
+    // Push first: the server streams every change (laser points included) as
+    // Server-Sent Events. Polling stays as a slow fallback for presence and in
+    // case the stream drops.
+    let es: EventSource | null = null
+    try {
+      es = new EventSource(`${baseUrl}/present/events`)
+      es.onmessage = (e) => {
+        if (!ready || inflight.current > 0) return
+        try {
+          apply(JSON.parse(e.data) as PresentStateWire)
+        } catch {
+          /* ignore malformed */
+        }
+      }
+    } catch {
+      es = null
+    }
+    const tick = async () => {
+      if (!ready || inflight.current > 0) return
+      try {
+        apply((await (await fetch(stateUrl)).json()) as PresentStateWire)
       } catch {
         /* preview restarting: keep trying */
       }
     }
     void tick()
-    const id = setInterval(tick, 100)
+    const id = setInterval(tick, es ? 1000 : 100)
     return () => {
       alive = false
       clearInterval(id)
+      es?.close()
       if (raf) cancelAnimationFrame(raf)
       onPosition?.(currentRef.current)
     }

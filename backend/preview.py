@@ -12,6 +12,7 @@ Routes (all GET):
   /check                     measures every slide (deck check, headless)
   /presenter?lang=           the presenter window (notes, next slide, timer, laser)
   /present/state             shared presenter state (GET/POST, loopback CORS)
+  /present/events            the same state pushed as Server-Sent Events
   /note?slide=               speaker note text for the presenter window
   /assets/<path>, /img/<path>, /out/<path>
                              static files from the deck folder (contained)
@@ -236,6 +237,7 @@ class PresentState:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
+        self._changed = threading.Condition(self._lock)
         self.seq = 0
         self.index = 0
         self.black = False
@@ -277,7 +279,13 @@ class PresentState:
                     changed = True
             if changed:
                 self.seq += 1
+                self._changed.notify_all()
         return self.snapshot()
+
+    def wait_for_change(self, since: int, timeout: float) -> bool:
+        """Block until seq advances past ``since`` or ``timeout`` elapses."""
+        with self._lock:
+            return self._changed.wait_for(lambda: self.seq != since, timeout=timeout)
 
 
 class DeckPreview:
@@ -446,6 +454,36 @@ class DeckPreview:
         return target if target.is_file() else None
 
     # --- dispatch
+    def _present_events(self, h: BaseHTTPRequestHandler) -> None:
+        """Server-Sent Events: push the presenter state the moment it changes.
+
+        Polling cannot make a laser pointer smooth; this stream delivers every
+        update (laser points included) with no polling gap. A comment line is
+        sent every 15s as a keepalive; the client reconnects on its own.
+        """
+        cors = _cors_origin(h)
+        try:
+            h.send_response(200)
+            h.send_header("Content-Type", "text/event-stream")
+            h.send_header("Cache-Control", "no-store")
+            h.send_header("Connection", "keep-alive")
+            if cors:
+                h.send_header("Access-Control-Allow-Origin", cors)
+                h.send_header("Vary", "Origin")
+            h.end_headers()
+            since = -1
+            while True:
+                snap = self.present.snapshot()
+                if snap["seq"] != since:
+                    since = snap["seq"]
+                    h.wfile.write(f"data: {json.dumps(snap)}\n\n".encode("utf-8"))
+                    h.wfile.flush()
+                if not self.present.wait_for_change(since, timeout=15.0):
+                    h.wfile.write(b": keepalive\n\n")
+                    h.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            return  # client went away
+
     def _handle_post(self, h: BaseHTTPRequestHandler) -> None:
         path = urlsplit(h.path).path
         if path != "/present/state":
@@ -464,6 +502,8 @@ class DeckPreview:
         path = url.path
         if path == "/present/state":
             return _send(h, 200, json.dumps(self.present.snapshot()).encode("utf-8"), "application/json", cors=_cors_origin(h))
+        if path == "/present/events":
+            return self._present_events(h)
         if path == "/presenter":
             lang = parse_qs(url.query).get("lang", ["en"])[0][:5]
             return _send(h, 200, self.presenter_page(lang).encode("utf-8"), "text/html; charset=utf-8")
