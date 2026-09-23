@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Client, TweakInfo, TweakItem } from '../api'
+import type { Client, DesignInfo, TweakInfo, TweakItem } from '../api'
 import { ApiError } from '../api'
 import { SmallBtn } from './SmallBtn'
 import { Spinner } from './Spinner'
@@ -10,6 +10,11 @@ type Props = {
   t: T
   client: Client
   deckPath: string
+  /** DESIGN.md / tokens.css state, when the deck has a DESIGN.md. */
+  design?: DesignInfo | null
+  /** Write (or refresh) tokens.css from DESIGN.md without other changes. */
+  onWriteTokens?: () => void
+  tokensBusy?: boolean
   /** Called after the preview server accepted new overrides (bump reloadKey). */
   onPreview: () => void
   /** Called after Apply wrote tokens.css (refresh design info, preview). */
@@ -31,7 +36,7 @@ function splitLength(v: string): { n: number; unit: string } | null {
  * slide page, so the strip and the viewer follow at once; nothing is written
  * until Apply, which updates DESIGN.md and regenerates tokens.css.
  */
-export function TweakPanel({ t, client, deckPath, onPreview, onApplied, onClose }: Props) {
+export function TweakPanel({ t, client, deckPath, design, onWriteTokens, tokensBusy = false, onPreview, onApplied, onClose }: Props) {
   const [info, setInfo] = useState<TweakInfo | null>(null)
   const [changes, setChanges] = useState<Record<string, string>>({})
   const [error, setError] = useState<string | null>(null)
@@ -156,10 +161,16 @@ export function TweakPanel({ t, client, deckPath, onPreview, onApplied, onClose 
         <SmallBtn onClick={onClose}>{t('layout.close')}</SmallBtn>
       </div>
       <p className="m-0 mb-2 text-muted flex-none">{info?.hasDesign ? t('tweak.hint_design') : t('tweak.hint_default')}</p>
-      {info?.hasDesign && info.css !== 'tokens.css' && (
-        <p className="m-0 mb-2 flex-none" style={{ color: 'var(--warn)' }}>
-          {t('tweak.hint_no_tokens')}
-        </p>
+      {info?.hasDesign && design && !design.empty && (!design.tokensExists || design.tokensStale || info.css !== 'tokens.css') && (
+        <div className="mb-2 flex-none flex items-center gap-2 flex-wrap rounded-md border px-2 py-1" style={{ borderColor: 'var(--warn)' }}>
+          <span style={{ color: 'var(--warn)' }}>{!design.tokensExists ? t('theme.tokens.missing') : design.tokensStale ? t('theme.tokens.stale') : t('tweak.hint_no_tokens')}</span>
+          {onWriteTokens && (
+            <SmallBtn onClick={onWriteTokens} disabled={tokensBusy || applying} className="inline-flex items-center gap-1" title={t('theme.tokens.hint')}>
+              {tokensBusy && <Spinner />}
+              {!design.tokensExists ? t('theme.tokens.write') : t('theme.tokens.update')}
+            </SmallBtn>
+          )}
+        </div>
       )}
       {error && (
         <p className="m-0 mb-2" role="alert" style={{ color: 'var(--danger)' }}>

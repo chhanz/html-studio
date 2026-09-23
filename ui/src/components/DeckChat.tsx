@@ -85,6 +85,7 @@ export function DeckChat({ t, locale, deck, preview, build, open, onToggle, refr
           onClick={onToggle}
           aria-expanded={open}
           aria-controls="deck-chat-body"
+          title={t('chat.tagline')}
           className="flex-1 min-w-0 flex items-center gap-2 py-1 px-1 -mx-1 rounded-md text-[15px] font-semibold text-text-strong hover:bg-bg-hover cursor-pointer bg-transparent border-0 text-left"
         >
           <span
@@ -95,7 +96,7 @@ export function DeckChat({ t, locale, deck, preview, build, open, onToggle, refr
             ▸
           </span>
           {t('panel.chat')}
-          {!open && <span className="font-normal text-[12px] text-muted truncate ml-1">{t('chat.tagline')}</span>}
+
         </button>
         <div className="flex gap-1 items-center flex-none">
           {status === 'checking' && <Spinner />}

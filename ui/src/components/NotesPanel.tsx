@@ -108,13 +108,14 @@ export function NotesPanel({ t, client, deckPath, slide, slideNumber, open, onTo
           onClick={onToggle}
           aria-expanded={open}
           aria-controls="notes-body"
+          title={t('notes.tagline')}
           className="flex-1 min-w-0 flex items-center gap-2 py-1 px-1 -mx-1 rounded-md text-[15px] font-semibold text-text-strong hover:bg-bg-hover cursor-pointer bg-transparent border-0 text-left"
         >
           <span aria-hidden className="inline-flex items-center justify-center w-5 h-5 text-[14px] text-muted transition-transform" style={{ transform: open ? 'rotate(90deg)' : 'none' }}>
             ▸
           </span>
           {t('notes.title', { n: slideNumber })}
-          <span className="font-normal text-[12px] text-muted truncate ml-1">{open ? file : text.trim() ? t('notes.has') : t('notes.tagline')}</span>
+          <span className="font-normal text-[12px] text-muted truncate ml-1" title={t('notes.tagline')}>{open ? file : text.trim() ? t('notes.has') : ''}</span>
         </button>
         <span className="flex-none text-[12px] text-muted inline-flex items-center gap-1" role="status">
           {(loading || save === 'saving') && <Spinner />}

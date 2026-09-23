@@ -1,35 +1,39 @@
 import type { DesignInfo } from '../api'
-import { SmallBtn } from './SmallBtn'
-import { Spinner } from './Spinner'
 
 type T = (key: string, vars?: Record<string, string | number>) => string
 
 type Props = {
   t: T
   info: DesignInfo
-  busy: boolean
-  onWriteTokens: () => void
+  /** Opens the theme panel, which owns tokens.css generation and edits. */
+  onOpenTheme: () => void
 }
 
 // Colours worth showing as swatches, in priority order; the rest are counted.
 const SWATCH_ORDER = ['primary', 'secondary', 'accent', 'canvas-soft', 'canvas', 'surface', 'ink', 'hairline']
 
 /**
- * One line under the toolbar when the deck has a DESIGN.md: what the theme is
- * (name, key colours, font) and the tokens.css state with a button to write or
- * refresh it. Writing a file into the deck is always an explicit click.
+ * One quiet line under the toolbar when the deck has a DESIGN.md: its name,
+ * key colours and font. Clicking it opens the theme panel; a small marker says
+ * when tokens.css is missing or behind DESIGN.md.
  */
-export function ThemeRow({ t, info, busy, onWriteTokens }: Props) {
+export function ThemeRow({ t, info, onOpenTheme }: Props) {
   const d = info.design
-  if (!info.present || !d) return null
+  if (!info.present || !d || info.empty) return null
   const names = Object.keys(d.colors)
   const shown = [...SWATCH_ORDER.filter((n) => n in d.colors), ...names.filter((n) => !SWATCH_ORDER.includes(n))].slice(0, 8)
   const more = names.length - shown.length
   const state = !info.tokensExists ? 'missing' : info.tokensStale ? 'stale' : 'fresh'
-  const ownCss = info.css && info.css !== info.tokens
 
   return (
-    <div className="mb-2 flex-none flex items-center gap-2 flex-wrap text-[12px] text-muted" data-testid="theme-row" data-tokens={state}>
+    <button
+      type="button"
+      onClick={onOpenTheme}
+      className="mb-2 flex-none flex items-center gap-2 flex-wrap text-[12px] text-muted bg-transparent border-0 p-0 cursor-pointer hover:text-text text-left"
+      data-testid="theme-row"
+      data-tokens={state}
+      title={t('theme.row_hint')}
+    >
       <span className="font-medium text-text">{d.name || 'DESIGN.md'}</span>
       <span className="inline-flex items-center gap-1" aria-label={t('theme.colors')}>
         {shown.map((n) => (
@@ -45,19 +49,12 @@ export function ThemeRow({ t, info, busy, onWriteTokens }: Props) {
         {more > 0 && <span>+{more}</span>}
       </span>
       {d.font.family && <span className="truncate">{d.font.family}</span>}
-      <span className="ml-auto inline-flex items-center gap-2">
-        {info.empty ? (
-          <span>{t('theme.empty')}</span>
-        ) : (
-          <>
-            <span>{state === 'missing' ? t('theme.tokens.missing') : state === 'stale' ? t('theme.tokens.stale') : t('theme.tokens.fresh')}</span>
-            <SmallBtn onClick={onWriteTokens} disabled={busy} title={ownCss ? t('theme.tokens.own_css_hint', { css: info.css! }) : t('theme.tokens.hint')} className="inline-flex items-center gap-1">
-              {busy && <Spinner />}
-              {state === 'missing' ? t('theme.tokens.write') : t('theme.tokens.update')}
-            </SmallBtn>
-          </>
-        )}
-      </span>
-    </div>
+      {state !== 'fresh' && (
+        <span className="inline-flex items-center gap-1" style={{ color: 'var(--warn)' }}>
+          <span aria-hidden className="inline-block rounded-full" style={{ width: 6, height: 6, background: 'var(--warn)' }} />
+          {state === 'missing' ? t('theme.tokens.missing') : t('theme.tokens.stale')}
+        </span>
+      )}
+    </button>
   )
 }

@@ -246,7 +246,7 @@ test('deck chat pane: looks up, starts once, embeds the deck session', async ({ 
   // Collapsed by default, with a one-line purpose in the header; open it.
   const header = page.getByRole('button', { name: /Deck chat/ })
   await expect(header).toHaveAttribute('aria-expanded', 'false')
-  await expect(header).toContainText('ask the agent to change this deck')
+  await expect(header).toHaveAttribute('title', /ask the agent to change this deck/) // the purpose lives in the tooltip
   await header.click()
   await expect(header).toHaveAttribute('aria-expanded', 'true')
 
@@ -371,8 +371,13 @@ test('DESIGN.md: theme row shows the design, tokens.css is written on demand and
   expect(await accent()).toBe('#6d5efc')
   await expect(page.getByText(/^Built-in theme$/)).toBeVisible()
 
-  await page.getByRole('button', { name: /^Generate tokens\.css$/ }).click()
+  // The row opens the theme panel, which owns tokens.css generation.
+  await row.click()
+  const panel = page.getByTestId('tweak-panel')
+  await expect(panel).toContainText('tokens.css not generated')
+  await panel.getByRole('button', { name: /^Generate tokens\.css$/ }).click()
   await expect(row).toHaveAttribute('data-tokens', 'fresh')
+  await expect(panel).not.toContainText('tokens.css not generated')
   await expect(page.getByText(/^Built-in theme \+ tokens\.css$/)).toBeVisible()
   // After: the preview server serves tokens.css and the slide picks up the DESIGN.md primary.
   const home = await fakeHome(page)
@@ -606,7 +611,7 @@ test('speaker notes: autosaves notes/<slide>.md, marks the thumbnail, survives r
   const deckPath = `${home}/decks/acme-quarterly`
   const header = page.getByRole('button', { name: /^Notes for slide 1/ })
   await expect(header).toHaveAttribute('aria-expanded', 'false')
-  await expect(header).toContainText('speaker notes')
+  await expect(header).toHaveAttribute('title', /speaker notes/)
   await header.click()
   const box = page.getByRole('textbox', { name: /Notes for slide 1/ })
   await expect(box).toBeVisible()

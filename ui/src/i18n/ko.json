@@ -87,8 +87,6 @@
   "present.keys": "← → 또는 클릭: 이동 · 이미지 클릭: 확대 · Esc: 종료",
   "present.fullscreen": "전체화면",
   "present.close": "종료",
-  "present.browser": "브라우저에서 열기",
-  "present.browser_hint": "빌드된 덱을 기본 브라우저에서 열기(두 번째 화면용)",
   "chat.title": "HTML Studio · {name}",
   "chat.failed": "덱 채팅을 열 수 없습니다",
   "chat.none": "{name}의 세션이 아직 없습니다.",
@@ -287,5 +285,8 @@
   "tweak.applied": "적용됨",
   "tweak.dirty": "{n}개 변경, 미적용",
   "tweak.note": "덱 자체 CSS에 직접 적힌 색은 변수가 아니라 조정되지 않습니다.",
-  "tweak.hint_no_tokens": "아직 tokens.css가 이 덱의 스타일시트가 아니어서, 적용(생성)하기 전에는 슬라이드가 이 변수를 읽지 않을 수 있습니다."
+  "tweak.hint_no_tokens": "아직 tokens.css가 이 덱의 스타일시트가 아니어서, 적용(생성)하기 전에는 슬라이드가 이 변수를 읽지 않을 수 있습니다.",
+  "toolbar.group_view": "보기와 도구",
+  "toolbar.group_actions": "작업",
+  "theme.row_hint": "테마 패널 열기"
 }

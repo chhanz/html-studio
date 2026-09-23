@@ -54,7 +54,7 @@ export function BuildPanel({ t, result, pendingCommand, onTrust, onCancelTrust, 
           {result.output ? ` · ${result.output}` : ''}
         </span>
         <span className="ml-auto flex gap-1">
-          {log && <SmallBtn onClick={() => setShowLog((v) => !v)} active={showLog}>{t('build.log')}</SmallBtn>}
+          {log && !result.ok && <SmallBtn onClick={() => setShowLog((v) => !v)} active={showLog}>{t('build.log')}</SmallBtn>}
           <SmallBtn onClick={onDismiss} aria-label={t('build.dismiss')}>✕</SmallBtn>
         </span>
       </div>

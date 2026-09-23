@@ -87,8 +87,6 @@
   "present.keys": "← → or click: navigate · click an image: enlarge · Esc: exit",
   "present.fullscreen": "Fullscreen",
   "present.close": "Exit",
-  "present.browser": "Open in browser",
-  "present.browser_hint": "Open the built deck in your default browser (for a second screen)",
   "chat.title": "HTML Studio · {name}",
   "chat.failed": "Could not open the deck chat",
   "chat.none": "No session for {name} yet.",
@@ -287,5 +285,8 @@
   "tweak.applied": "Applied",
   "tweak.dirty": "{n} changed, not applied",
   "tweak.note": "Colours hard-coded in the deck's own CSS are not variables and stay as they are.",
-  "tweak.hint_no_tokens": "tokens.css is not the deck's stylesheet yet, so slides do not read these variables until you Apply (which generates it) or the slides use them."
+  "tweak.hint_no_tokens": "tokens.css is not the deck's stylesheet yet, so slides do not read these variables until you Apply (which generates it) or the slides use them.",
+  "toolbar.group_view": "View and tools",
+  "toolbar.group_actions": "Actions",
+  "theme.row_hint": "Open the theme panel"
 }

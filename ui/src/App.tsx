@@ -133,6 +133,7 @@ export default function HtmlStudio() {
           return
         }
         setBuildResult(res)
+        if (res.ok) setTimeout(() => setBuildResult((cur) => (cur === res ? null : cur)), 8000)
         setReloadKey((k) => k + 1)
         const info = await client.buildInfo(selected.path)
         setBuildInfo(info)
@@ -661,11 +662,6 @@ export default function HtmlStudio() {
     if (!selected || !outputUrl) return
     setPresenting(true)
   }, [selected, outputUrl])
-  const presentInBrowser = useCallback(() => {
-    if (!selected) return
-    void client.present(selected.path, current + 1).catch((e) => setPdfError(e instanceof ApiError ? e.code : 'request_failed'))
-  }, [client, selected, current])
-
   const exportPdf = useCallback(async () => {
     if (!selected) return
     setPdfError(null)
@@ -1039,9 +1035,11 @@ export default function HtmlStudio() {
           <div className="hs-fill min-h-0 flex flex-col">
           <div className="flex items-center justify-between gap-2 mb-2 flex-wrap flex-none">
             <CardTitle>{selected ? selected.name : t('panel.preview')}</CardTitle>
-            <div className="flex gap-1 flex-wrap items-center">
+            <div className="flex gap-3 flex-wrap items-center">
+              {/* Left cluster: how the deck is shown (view mode + toggles). Right cluster: things that run. */}
+              <div className="flex gap-1 items-center" role="group" aria-label={t('toolbar.group_view')}>
               {preview && (
-                <div className="inline-flex rounded-md border border-border overflow-hidden mr-2" role="group" aria-label={t('view.label')}>
+                <div className="inline-flex rounded-md border border-border overflow-hidden mr-1" role="group" aria-label={t('view.label')}>
                   {(outputUrl ? (['slides', 'output', 'code'] as const) : (['slides', 'code'] as const)).map((m) => (
                     <button
                       key={m}
@@ -1061,16 +1059,6 @@ export default function HtmlStudio() {
                 </div>
               )}
               <SmallBtn
-                active
-                onClick={() => runBuild(false)}
-                disabled={!canBuild}
-                className="inline-flex items-center gap-1.5"
-                title={buildHint}
-              >
-                {building && <Spinner />}
-                {t('toolbar.build')}
-              </SmallBtn>
-              <SmallBtn
                 onClick={() => setSelectMode((v) => !v)}
                 active={selectMode}
                 aria-pressed={selectMode}
@@ -1082,6 +1070,17 @@ export default function HtmlStudio() {
               <SmallBtn onClick={() => setTweakOpen((v) => !v)} active={tweakOpen} aria-pressed={tweakOpen} disabled={!selected || !preview} title={t('toolbar.tweak_hint')} data-testid="toolbar-tweak">
                 {t('toolbar.tweak')}
               </SmallBtn>
+              </div>
+              <div className="flex gap-1 items-center" role="group" aria-label={t('toolbar.group_actions')}>
+              <SmallBtn
+                onClick={() => runBuild(false)}
+                disabled={!canBuild}
+                className="inline-flex items-center gap-1.5"
+                title={buildHint}
+              >
+                {building && <Spinner />}
+                {t('toolbar.build')}
+              </SmallBtn>
               <SmallBtn
                 onClick={() => void runCheck()}
                 disabled={!preview || checkJob?.state === 'running'}
@@ -1090,12 +1089,6 @@ export default function HtmlStudio() {
               >
                 {checkJob?.state === 'running' && <Spinner />}
                 {checkJob?.state === 'running' && preview ? t('check.running', { n: preview.slides.length }) : t('toolbar.check')}
-              </SmallBtn>
-              <SmallBtn onClick={present} disabled={!outputUrl} title={outputUrl ? t('present.hint') : t('present.need_output')}>
-                {t('toolbar.present')}
-              </SmallBtn>
-              <SmallBtn onClick={presentInBrowser} disabled={!outputUrl} title={t('present.browser_hint')} aria-label={t('present.browser')}>
-                ↗
               </SmallBtn>
               <SmallBtn
                 onClick={() => void exportPdf()}
@@ -1106,6 +1099,10 @@ export default function HtmlStudio() {
                 {pdf?.state === 'running' && <Spinner />}
                 {t('toolbar.pdf')}
               </SmallBtn>
+              <SmallBtn active onClick={present} disabled={!outputUrl} title={outputUrl ? t('present.hint') : t('present.need_output')}>
+                {t('toolbar.present')}
+              </SmallBtn>
+              </div>
             </div>
           </div>
           {selected && (pdf?.state === 'done' || pdfError) && (
@@ -1131,7 +1128,7 @@ export default function HtmlStudio() {
               <SmallBtn className="ml-auto" onClick={() => { setPdf(null); setPdfError(null) }} aria-label={t('build.dismiss')}>✕</SmallBtn>
             </div>
           )}
-          {selected && designInfo && <ThemeRow t={t} info={designInfo} busy={tokensBusy} onWriteTokens={() => void writeTokens()} />}
+          {selected && designInfo && <ThemeRow t={t} info={designInfo} onOpenTheme={() => setTweakOpen(true)} />}
           {selected && checkError && (
             <div className="mb-2 flex-none rounded-md border p-2 text-[12px]" style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }} role="alert">
               {t('check.failed')}: {t(`error.${checkError}`) === `error.${checkError}` ? t('error.generic', { code: checkError }) : t(`error.${checkError}`)}
@@ -1273,6 +1270,9 @@ export default function HtmlStudio() {
                 t={t}
                 client={client}
                 deckPath={selected.path}
+                design={designInfo}
+                tokensBusy={tokensBusy}
+                onWriteTokens={() => void writeTokens()}
                 onPreview={() => setReloadKey((k) => k + 1)}
                 onApplied={() => {
                   setReloadKey((k) => k + 1)
