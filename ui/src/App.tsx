@@ -632,7 +632,7 @@ export default function HtmlStudio() {
             className="flex-none flex items-center justify-center"
             style={{ flex: '0 0 12px', height: 12, cursor: 'row-resize', touchAction: 'none' }}
           >
-            <div className="rounded-full" style={{ width: 48, height: 4, background: 'var(--border-strong, var(--border))' }} />
+            <div className="rounded-full" style={{ flex: '0 0 3px', width: 40, height: 3, background: 'var(--border-strong, var(--border))', opacity: 0.8 }} />
           </div>
         ) : (
           <div style={{ flex: '0 0 12px', height: 12 }} />
