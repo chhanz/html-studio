@@ -10,6 +10,8 @@ backend/inject/ scripts and pages the preview server injects or serves (select o
 backend/layouts/ built-in slide layouts
 backend/tests/  unittest suites (one file per module)
 ui/             React + TypeScript (Vite); the dashboard supplies react, lucide-react and @kirocrew/app-sdk
+ui/src/hooks/   one hook per concern (connection, preview, build, chat, pins, check, arrange, theme, layout)
+ui/src/components/ the panes and dialogs; App.tsx wires the hooks to them and lays out the page
 e2e/            Playwright harness that runs the built UI against the real backend
 skills/         the skill the agent reads before applying visual-edit batches
 docs/           user-facing documentation
