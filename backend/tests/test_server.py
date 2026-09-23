@@ -78,6 +78,15 @@ class ServerTest(unittest.TestCase):
             cls.proc.stdout.close()
         cls.tmp.cleanup()
 
+    def poll_build(self, job_id: str) -> dict:
+        for _ in range(100):
+            code, data = self.request("GET", f"/api/build?id={job_id}", signed=True)
+            self.assertEqual(code, 200, data)
+            if data["state"] != "running":
+                return data
+            time.sleep(0.05)
+        self.fail("build job did not finish")
+
     def request(self, method: str, target: str, *, signed: bool, body: bytes = b"", ts: int | None = None):
         req = urllib.request.Request(self.base + target, data=body or None, method=method)
         if signed:
@@ -107,7 +116,7 @@ class ServerTest(unittest.TestCase):
         code, data = self.request("GET", "/api/status", signed=True)
         self.assertEqual(code, 200)
         self.assertEqual(data["app"], "html-studio")
-        self.assertEqual(data["version"], "0.1.29")
+        self.assertEqual(data["version"], "0.1.30")
         self.assertTrue(data["dataDir"].startswith(self.tmp.name))
 
     def test_signed_unknown_route_is_404(self) -> None:
@@ -184,14 +193,19 @@ class ServerTest(unittest.TestCase):
             self.assertEqual((code, data["ok"], data["mode"]), (200, True, "builtin"), data)
             self.assertTrue((deck / "out" / "index.html").is_file())
 
-            # External command: 409 until trusted.
+            # External command: consent first; once trusted it runs as a job
+            # (the proxy caps a request at ~30s, real build scripts run longer).
             (deck / "studio.json").write_text(json.dumps({"build": "mkdir -p out && echo x > out/index.html"}))
             code, data = self.request("POST", "/api/build", signed=True, body=body)
             self.assertEqual((code, data["ok"], data["needsTrust"], data["error"]), (200, False, True, "untrusted_command"))
             self.assertIn("mkdir", data["command"])
             trust_body = json.dumps({"path": str(deck), "trust": True}).encode()
             code, data = self.request("POST", "/api/build", signed=True, body=trust_body)
-            self.assertEqual((code, data["ok"], data["mode"]), (200, True, "external"), data)
+            self.assertEqual((code, data["state"]), (200, "running"), data)
+            data = self.poll_build(data["job"])
+            self.assertEqual((data["state"], data["result"]["ok"], data["result"]["mode"]), ("done", True, "external"), data)
+            code, data = self.request("GET", "/api/build?id=nope", signed=True)
+            self.assertEqual((code, data["error"]), (404, "unknown_job"))
 
             # Reveal refuses paths outside the deck.
             code, data = self.request("POST", "/api/reveal", signed=True,

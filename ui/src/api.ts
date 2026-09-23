@@ -56,6 +56,12 @@ export type BuildResult = {
   stderr?: string
 }
 
+/** An external build runs as a job: POST /build answers this, GET /build?id= the progress. */
+export type BuildStart = { job: string; state: 'running' }
+export type BuildJob = { id: string; state: 'running' | 'done' | 'error'; result?: BuildResult; error?: string; detail?: string }
+/** What an edit route reports about the rebuild it triggered. */
+export type Rebuild = BuildResult | BuildStart | { skipped: string }
+
 export type PdfJob = { id: string; state: 'running' | 'done' | 'error'; output?: string; bytes?: number; error?: string; detail?: string }
 
 export class ApiError extends Error {
@@ -112,7 +118,8 @@ export function makeClient(api: AppApi) {
     previewStart: (path: string) => wrap(api.post<PreviewInfo>(`${API}/preview/start`, { path })),
     previewStop: (path: string) => wrap(api.post<{ stopped: boolean }>(`${API}/preview/stop`, { path })),
     buildInfo: (path: string) => wrap(api.post<BuildInfo>(`${API}/build/info`, { path })),
-    build: (path: string, trust = false) => wrap(api.post<BuildResult>(`${API}/build`, { path, trust })),
+    build: (path: string, trust = false) => wrap(api.post<BuildResult | BuildStart>(`${API}/build`, { path, trust })),
+    buildStatus: (id: string) => wrap(api.get<BuildJob>(`${API}/build?id=${encodeURIComponent(id)}`)),
     present: (path: string, slide?: number, mode?: 'presenter', language?: string) =>
       wrap(api.post<{ url: string; opened: boolean }>(`${API}/present`, { path, slide, mode, language })),
     pdfStart: (path: string) => wrap(api.post<PdfJob>(`${API}/pdf`, { path })),
@@ -129,7 +136,7 @@ export function makeClient(api: AppApi) {
     tweakInfo: (path: string) => wrap(api.get<TweakInfo>(`${API}/design/tweak?path=${encodeURIComponent(path)}`)),
     tweakPreview: (path: string, changes: Record<string, string>) => wrap(api.post<{ ok: true; count: number }>(`${API}/design/tweak/preview`, { path, changes })),
     tweakApply: (path: string, changes: Record<string, string>) =>
-      wrap(api.post<{ created: boolean; css: string; unknown: string[]; designInfo: DesignInfo; rebuild?: BuildResult | { skipped: string } }>(`${API}/design/tweak`, { path, changes })),
+      wrap(api.post<{ created: boolean; css: string; unknown: string[]; designInfo: DesignInfo; rebuild?: Rebuild }>(`${API}/design/tweak`, { path, changes })),
     deckNew: (req: NewDeckRequest) => wrap(api.post<{ deck: Deck }>(`${API}/decks/new`, req)),
     layouts: () => wrap(api.get<{ items: Layout[] }>(`${API}/layouts`)),
     layoutSave: (path: string, slide: string, name: string) => wrap(api.post<Layout>(`${API}/layouts`, { path, slide, name })),
@@ -203,12 +210,12 @@ export type CheckJob = { id: string; state: 'running' | 'done' | 'error'; result
 
 export type NotesIndex = { withNotes: string[]; orphans: string[]; dir: string }
 export type SlideSource = { slide: string; file: string; kind: 'file' | 'section'; text: string; mtime: number }
-export type SourceSaved = { slide: string; file: string; mtime: number; rebuild?: BuildResult | { skipped: string } }
+export type SourceSaved = { slide: string; file: string; mtime: number; rebuild?: Rebuild }
 export type NewDeckTheme = { kind: 'default' } | { kind: 'design'; accent: string; bg: string; fg: string; font?: string } | { kind: 'copy'; from: string }
 export type NewDeckRequest = { root: string; folder: string; title: string; presenter: string; purpose: string; audience: string; sources: string; theme: NewDeckTheme }
 export type TweakItem = { var: string; group: 'colors' | 'font' | 'typography' | 'spacing' | 'rounded'; name: string; kind: 'color' | 'length' | 'text'; value: string }
 export type TweakInfo = { hasDesign: boolean; items: TweakItem[]; css: string | null; layered?: boolean }
 export type Layout = { id: string; name: string | null; builtin: boolean; created?: number }
-export type Arranged = { slides: string[]; rebuild?: BuildResult | { skipped: string } }
+export type Arranged = { slides: string[]; rebuild?: Rebuild }
 export type ArchivedSlide = { name: string; file: string; mtime: number; hasNote: boolean }
 export type Note = { slide: string; file: string; text: string }

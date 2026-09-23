@@ -1,7 +1,7 @@
 import { useAppApi } from '@kirocrew/app-sdk'
 import { Card, CardTitle, PageHeader } from '@kirocrew/app-sdk/ui'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ApiError, type BackendStatus, type BuildInfo, type BuildResult, type CheckIssue, type CheckJob, type CheckResult, type Deck, type DesignInfo, type NotesIndex, type PdfJob, type PreviewInfo, type Arranged, type ArchivedSlide, type NewDeckRequest, makeClient } from './api'
+import { ApiError, type BackendStatus, type BuildInfo, type BuildResult, type CheckIssue, type CheckJob, type CheckResult, type Deck, type DesignInfo, type NotesIndex, type PdfJob, type PreviewInfo, type Arranged, type ArchivedSlide, type NewDeckRequest, type Rebuild, makeClient } from './api'
 import { openDeckChat } from './chat'
 import { BuildPanel } from './components/BuildPanel'
 import { CheckPanel, issueKey } from './components/CheckPanel'
@@ -121,17 +121,54 @@ export default function HtmlStudio() {
     }
   }, [client, selected?.path]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  /**
+   * Resolve a build answer to its result. A built-in build answers at once; an
+   * external command answers a job id (its script may outlast the 30s the
+   * dashboard proxy gives one request), which is polled here until it ends.
+   */
+  const awaitBuild = useCallback(
+    async (res: Rebuild | undefined): Promise<BuildResult | null> => {
+      if (!res || !('ok' in res || 'job' in res)) return null
+      if ('ok' in res) return res
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 1000))
+        const st = await client.buildStatus(res.job)
+        if (st.state === 'done' && st.result) return st.result
+        if (st.state === 'error') return { ok: false, mode: 'external', stderr: st.detail || st.error || 'build_failed' }
+      }
+    },
+    [client],
+  )
+
+  /** After an edit route reports a rebuild: show its result once it is known. */
+  const showRebuild = useCallback(
+    (rebuild: Rebuild | undefined, path: string) => {
+      if (!rebuild || 'skipped' in rebuild) return
+      if ('job' in rebuild) setBuilding(true)
+      void awaitBuild(rebuild)
+        .then((r) => {
+          if (!r) return
+          setBuildResult(r)
+          if (r.ok) setReloadKey((k) => k + 1)
+          void client.buildInfo(path).then(setBuildInfo).catch(() => undefined)
+        })
+        .finally(() => setBuilding(false))
+    },
+    [awaitBuild, client],
+  )
+
   const runBuild = useCallback(
     async (trust = false) => {
       if (!selected) return
       setBuilding(true)
       setPendingCommand(null)
       try {
-        const res = await client.build(selected.path, trust)
-        if (res.needsTrust && res.command) {
-          setPendingCommand(res.command)
+        const first = await client.build(selected.path, trust)
+        if ('ok' in first && first.needsTrust && first.command) {
+          setPendingCommand(first.command)
           return
         }
+        const res = (await awaitBuild(first)) as BuildResult
         setBuildResult(res)
         if (res.ok) setTimeout(() => setBuildResult((cur) => (cur === res ? null : cur)), 8000)
         setReloadKey((k) => k + 1)
@@ -144,7 +181,7 @@ export default function HtmlStudio() {
         setBuilding(false)
       }
     },
-    [client, selected],
+    [client, selected, awaitBuild],
   )
 
   const openIssue = (file: string) => {
@@ -505,13 +542,10 @@ export default function HtmlStudio() {
         const i = res.slides.indexOf(focus)
         if (i >= 0) setCurrent(i)
       } else setCurrent((c) => Math.min(c, Math.max(0, res.slides.length - 1)))
-      if (res.rebuild && 'ok' in res.rebuild) {
-        setBuildResult(res.rebuild)
-        if (selected) void client.buildInfo(selected.path).then(setBuildInfo).catch(() => undefined)
-      }
+      if (selected) showRebuild(res.rebuild, selected.path)
       if (selected) void client.slidesArchiveList(selected.path).then((r) => setArchived(r.items)).catch(() => undefined)
     },
-    [client, selected],
+    [client, selected, showRebuild],
   )
   const runArrange = useCallback(
     async (op: () => Promise<Arranged & { name?: string }>, focusFromName = true) => {
@@ -1210,10 +1244,7 @@ export default function HtmlStudio() {
                     refreshKey={reloadKey}
                     onSaved={(res) => {
                       setReloadKey((k) => k + 1)
-                      if (res.rebuild && 'ok' in res.rebuild) {
-                        setBuildResult(res.rebuild)
-                        void client.buildInfo(selected.path).then(setBuildInfo).catch(() => undefined)
-                      }
+                      showRebuild(res.rebuild, selected.path)
                     }}
                   />
                 </div>

@@ -49,7 +49,7 @@ Optional. Every key is optional.
 |---|---|
 | `slidesDir` | folder holding the slide fragments (default `slides`) |
 | `css` | the deck stylesheet, relative to the deck. Without it, HTML Studio looks for `assets/deck.css`, `deck.css`, then `tokens.css`, and otherwise applies its built-in theme |
-| `build` | an external command that assembles the deck. It is never run until you approve it once in the studio; the approval is remembered per deck and command |
+| `build` | an external command that assembles the deck. It is never run until you approve it once in the studio; the approval is remembered per deck and command. The command runs in the deck folder in the background (up to two minutes) and is run again after every edit the studio makes once the output exists |
 | `output` | where the built deck lands (default `out/index.html`). Shown in the Built output view and used by Present |
 | `check.disable` | check rules to skip for this deck (see below) |
 | `title`, `presenter`, `purpose`, `audience` | deck metadata written by the new deck wizard; informational |

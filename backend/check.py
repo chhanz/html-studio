@@ -101,7 +101,11 @@ def finish(issues: list[dict[str, Any]], slides: list[str], disabled: set[str]) 
 
 
 class CheckJobs:
-    def __init__(self) -> None:
+    """Background jobs polled by id. ``kind`` prefixes the error codes
+    (``check_timeout`` / ``build_failed``) so one class serves every long task."""
+
+    def __init__(self, kind: str = "check") -> None:
+        self.kind = kind
         self._lock = threading.Lock()
         self._jobs: dict[str, dict[str, Any]] = {}
 
@@ -118,9 +122,9 @@ class CheckJobs:
         try:
             result = {"state": "done", "result": run()}
         except subprocess.TimeoutExpired:
-            result = {"state": "error", "error": "check_timeout"}
+            result = {"state": "error", "error": f"{self.kind}_timeout"}
         except Exception as exc:  # surfaced verbatim to the UI as detail
-            result = {"state": "error", "error": "check_failed", "detail": str(exc)[:300]}
+            result = {"state": "error", "error": f"{self.kind}_failed", "detail": str(exc)[:300]}
         with self._lock:
             self._jobs[job_id].update(result, finished=time.time())
 

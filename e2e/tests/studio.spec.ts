@@ -155,6 +155,44 @@ test('builds a slides deck with the built-in assembler and shows the output', as
   await expect(page.getByText('4 / 4')).toBeVisible()
 })
 
+test('external build command: asks for trust once, runs as a job that outlives one request, rebuilds after a save', async ({ page }) => {
+  await openApp(page)
+  await addFixtureRoot(page)
+  const home = await fakeHome(page)
+  // A build script that takes a while: the request must not wait for it.
+  const cmd = 'sleep 2 && mkdir -p out && cat slides/*.html > out/index.html'
+  await page.request.post('/__ctl/write', { data: { path: `${home}/decks/acme-quarterly/studio.json`, text: JSON.stringify({ build: cmd }) } })
+  await selectDeck(page, 'acme-quarterly')
+
+  const build = page.getByRole('button', { name: /^Build$/ })
+  await expect(build).toBeEnabled()
+  await build.click()
+  // Consent first: the dialog names the command.
+  const dialog = page.getByRole('dialog').filter({ hasText: /Run this deck's build command/ })
+  await expect(dialog).toContainText('sleep 2')
+  await dialog.getByRole('button', { name: /Trust and build/ }).click()
+  // The job is running: the Build button shows busy, then the result lands.
+  await expect(build).toBeDisabled()
+  await expect(page.getByRole('status').filter({ hasText: /Build succeeded/ })).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByText(/Deck build command/)).toBeVisible()
+  await expect(page.locator('iframe[title="out/index.html"]')).toBeVisible()
+  expect((await page.request.get(`/__ctl/read?path=${encodeURIComponent(`${home}/decks/acme-quarterly/out/index.html`)}`)).ok()).toBeTruthy()
+
+  // Saving a slide rebuilds through the same job path (no consent asked again).
+  await page.getByRole('status').filter({ hasText: /Build succeeded/ }).getByRole('button', { name: /Dismiss/ }).click()
+  await expect(page.getByRole('status').filter({ hasText: /Build succeeded/ })).toHaveCount(0)
+  await page.getByRole('group', { name: /^View$/ }).getByRole('button', { name: /^Code$/ }).click()
+  const ta = page.getByTestId('code-editor').locator('textarea')
+  await expect(ta).toHaveValue(/Acme Quarterly Review/)
+  const original = await ta.inputValue()
+  await ta.fill(original.replace('Acme Quarterly Review', 'Acme Quarterly Review 2'))
+  await page.getByTestId('code-editor').getByRole('button', { name: 'Save' }).click()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(page.getByRole('status').filter({ hasText: /Build succeeded/ })).toBeVisible({ timeout: 15_000 })
+  const built = await (await page.request.get(`/__ctl/read?path=${encodeURIComponent(`${home}/decks/acme-quarterly/out/index.html`)}`)).text()
+  expect(built).toContain('Acme Quarterly Review 2')
+})
+
 test('single-file deck: previews sections, build is disabled with a hint', async ({ page }) => {
   await openApp(page)
   await addFixtureRoot(page)

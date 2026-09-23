@@ -45,11 +45,12 @@ import export as export_lib  # noqa: E402
 
 PDF_JOBS = export_lib.ExportJobs()
 CHECK_JOBS = check_lib.CheckJobs()
+BUILD_JOBS = check_lib.CheckJobs("build")  # external build commands run off the request thread
 
 PREVIEWS = preview_lib.PreviewRegistry()
 
 APP_NAME = os.environ.get("KIROCREW_APP_NAME", "html-studio")
-APP_VERSION = "0.1.29"
+APP_VERSION = "0.1.30"
 PORT = int(os.environ.get("PORT", "9100"))
 HOME = Path(os.environ.get("KIROCREW_HOME", str(Path.home() / ".kiro" / "crew")))
 DATA_DIR = HOME / "apps" / APP_NAME / "data"
@@ -316,26 +317,52 @@ def route_build_info(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
     return 200, info
 
 
+def _start_external_build(deck: Path, info: dict[str, Any], command: str, output: str) -> str:
+    """Run a trusted external command in the background; the caller polls GET /build?id=.
+
+    The dashboard proxy gives a request about 30 seconds, and a real deck's
+    build script can take longer than that, so the request returns at once."""
+    job_id = BUILD_JOBS.start(lambda: build_lib.run_external(deck, command, output))
+    _log(f"build {job_id} started for {deck}: {command[:80]}")
+    return job_id
+
+
 def route_build(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
-    """Run the deck build. ``{"trust": true}`` records consent for the declared command."""
+    """Run the deck build. ``{"trust": true}`` records consent for the declared command.
+
+    A built-in build answers with its result. An external command answers
+    ``{"job": id, "state": "running"}`` and the result is fetched with GET /build?id=.
+    """
     deck = _deck_under_roots(str(body.get("path", "")))
     if deck is None:
         return 400, {"error": "deck_not_allowed"}
     info = deck_lib.describe_deck(deck, deck)
     if info is None:
         return 404, {"error": "not_a_deck"}
+    contract = build_lib.build_contract(deck, info.get("entry"))
+    command = contract["command"]
+    if command:
+        if body.get("trust"):
+            build_lib.trust(DATA_DIR, deck, command)
+        elif not build_lib.is_trusted(DATA_DIR, deck, command):
+            # Consent is a normal outcome, not a transport error: answer 200 so the
+            # UI gets the command text regardless of how the SDK surfaces non-2xx.
+            return 200, {"ok": False, "needsTrust": True, "error": "untrusted_command", "command": command}
+        return 200, {"job": _start_external_build(deck, info, command, contract["output"]), "state": "running"}
     try:
-        result = build_lib.build(
-            DATA_DIR, deck, info["slidesDir"], trust_command=bool(body.get("trust")),
-            entry=info.get("entry"), css_rel=_deck_css(deck),
-        )
+        result = build_lib.build(DATA_DIR, deck, info["slidesDir"], entry=info.get("entry"), css_rel=_deck_css(deck))
     except build_lib.BuildError as exc:
-        if exc.code == "not_buildable":
-            return 200, {"ok": False, "error": exc.code, "stderr": str(exc)}
-        # Consent is a normal outcome, not a transport error: answer 200 so the
-        # UI gets the command text regardless of how the SDK surfaces non-2xx.
-        return 200, {"ok": False, "needsTrust": True, "error": exc.code, "command": str(exc)}
+        return 200, {"ok": False, "error": exc.code, "stderr": str(exc)}
     return 200, result
+
+
+def route_build_status(h: "Handler", _body: dict[str, Any]) -> tuple[int, Any]:
+    """GET /build?id=<job>: ``{state: running|done|error, result?}`` for an external build."""
+    job_id = parse_qs(urlsplit(h.path).query).get("id", [""])[0]
+    rec = BUILD_JOBS.status(job_id)
+    if rec is None:
+        return 404, {"error": "unknown_job"}
+    return 200, rec
 
 
 # --- design (DESIGN.md → tokens.css) ---------------------------------------
@@ -495,8 +522,11 @@ def _maybe_rebuild(deck: Path, info: dict[str, Any], result: dict[str, Any]) -> 
     contract = build_lib.build_contract(deck, info.get("entry"))
     if not contract["outputExists"]:
         return
-    if contract["command"] and not build_lib.is_trusted(DATA_DIR, deck, contract["command"]):
-        result["rebuild"] = {"skipped": "needs_trust"}
+    if contract["command"]:
+        if not build_lib.is_trusted(DATA_DIR, deck, contract["command"]):
+            result["rebuild"] = {"skipped": "needs_trust"}
+        else:
+            result["rebuild"] = {"job": _start_external_build(deck, info, contract["command"], contract["output"]), "state": "running"}
         return
     try:
         result["rebuild"] = build_lib.build(DATA_DIR, deck, info["slidesDir"], entry=info.get("entry"), css_rel=_deck_css(deck))
@@ -900,6 +930,7 @@ ROUTES: dict[tuple[str, str], Route] = {
     ("POST", "/preview/stop"): route_preview_stop,
     ("POST", "/build/info"): route_build_info,
     ("POST", "/build"): route_build,
+    ("GET", "/build"): route_build_status,
     ("POST", "/present"): route_present,
     ("GET", "/notes"): route_notes_list,
     ("GET", "/note"): route_note_get,
