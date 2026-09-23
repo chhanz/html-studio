@@ -47,7 +47,7 @@ export function SlideViewer({ t, preview, current, onChange, reloadKey, selectMo
   }
 
   return (
-    <div className="flex flex-col gap-2 min-h-0 flex-1">
+    <div className="flex flex-col gap-2 flex-1" style={{ minHeight: 170 }}>
       <div className="flex items-center gap-2 text-[12px] text-muted flex-none">
         <SmallBtn onClick={prev} disabled={current === 0} aria-label={t('viewer.prev')}>
           ◂
@@ -63,7 +63,7 @@ export function SlideViewer({ t, preview, current, onChange, reloadKey, selectMo
         </span>
         <span className="ml-auto">{preview.css ? (preview.css === 'tokens.css' ? t('viewer.tokens_theme') : preview.css) : t('viewer.default_theme')}</span>
       </div>
-      <div className="flex-1 min-h-0" style={{ minHeight: 120 }}>
+      <div className="flex-1 min-h-0 relative">
         <SlideFrame
           src={`${preview.baseUrl}/slide/${current}${selectMode ? '?hs=select' : ''}`}
           stageWidth={preview.stage.width}

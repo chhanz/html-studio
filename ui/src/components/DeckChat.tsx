@@ -15,6 +15,8 @@ type Props = {
   build: BuildInfo | null
   open: boolean
   onToggle: () => void
+  /** Bump to look the session up again (e.g. after pins created it). */
+  refreshKey?: number
 }
 
 type Status = 'idle' | 'checking' | 'none' | 'ready' | 'error'
@@ -25,7 +27,7 @@ type Status = 'idle' | 'checking' | 'none' | 'ready' | 'error'
  * user starts a session explicitly, which creates it, scopes it to the deck
  * folder and sends the one-time brief (see chat.ts).
  */
-export function DeckChat({ t, locale, deck, preview, build, open, onToggle }: Props) {
+export function DeckChat({ t, locale, deck, preview, build, open, onToggle, refreshKey = 0 }: Props) {
   const api = useAppApi()
   const navigate = useNavigate()
   const [status, setStatus] = useState<Status>('idle')
@@ -57,7 +59,7 @@ export function DeckChat({ t, locale, deck, preview, build, open, onToggle }: Pr
     return () => {
       cancelled = true
     }
-  }, [api, deck])
+  }, [api, deck, refreshKey])
 
   const start = useCallback(async () => {
     if (!deck) return

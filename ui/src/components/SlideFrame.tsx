@@ -87,7 +87,10 @@ export function SlideFrame({ src, stageWidth, stageHeight, lazy = false, title, 
     const w = Math.floor(stageWidth * scale)
     const h = Math.floor(stageHeight * scale)
     return (
-      <div ref={boxRef} className="relative w-full h-full min-h-0 flex items-center justify-center" data-testid="slide-fit">
+      // Absolutely positioned so it can never be taller than the flex parent that
+      // hands it its space (a percentage height would keep a stale value while
+      // siblings grow and then overlap them).
+      <div ref={boxRef} className="absolute inset-0 flex items-center justify-center" data-testid="slide-fit">
         {scale > 0 && (
           <div className={`relative overflow-hidden ${className}`} style={{ width: w, height: h, background: '#fff' }} data-testid="slide-stage">
             {frame}

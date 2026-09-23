@@ -33,6 +33,7 @@ import decks as deck_lib  # noqa: E402
 import preview as preview_lib  # noqa: E402
 import build as build_lib  # noqa: E402
 import design as design_lib  # noqa: E402
+import pinqueue as queue_lib  # noqa: E402
 import export as export_lib  # noqa: E402
 
 PDF_JOBS = export_lib.ExportJobs()
@@ -40,7 +41,7 @@ PDF_JOBS = export_lib.ExportJobs()
 PREVIEWS = preview_lib.PreviewRegistry()
 
 APP_NAME = os.environ.get("KIROCREW_APP_NAME", "html-studio")
-APP_VERSION = "0.1.13"
+APP_VERSION = "0.1.14"
 PORT = int(os.environ.get("PORT", "9100"))
 HOME = Path(os.environ.get("KIROCREW_HOME", str(Path.home() / ".kiro" / "crew")))
 DATA_DIR = HOME / "apps" / APP_NAME / "data"
@@ -369,6 +370,91 @@ def route_design_tokens(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
     return 200, _design_payload(deck)
 
 
+# --- pins → agent (visual edit batches) -------------------------------------
+APP_DIR = Path(__file__).resolve().parent.parent
+QUEUE_DIR = DATA_DIR / "queue"
+SKILL_FILE = APP_DIR / "skills" / "deck-visual-edit" / "SKILL.md"
+REPORT_SCRIPT = Path(__file__).resolve().parent / "report.py"
+
+
+def route_pins_send(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
+    """POST /pins/send {path, pins:[...], language}: write a batch file, return the chat prompt.
+
+    The UI sends the prompt to the deck's chat session itself (dashboard API);
+    this backend only owns the queue files the agent reads and reports against.
+    """
+    deck = _deck_under_roots(str(body.get("path", "")))
+    if deck is None:
+        return 400, {"error": "deck_not_allowed"}
+    pins = body.get("pins")
+    if not isinstance(pins, list) or not pins:
+        return 400, {"error": "no_pins"}
+    if len(pins) > 50:
+        return 400, {"error": "too_many_pins"}
+    batch = queue_lib.make_batch(deck, deck.name, [p for p in pins if isinstance(p, dict)], str(body.get("language") or "en"))
+    try:
+        path = queue_lib.write_batch(QUEUE_DIR, batch)
+    except OSError as exc:
+        return 500, {"error": "write_failed", "detail": str(exc)}
+    prompt = queue_lib.build_prompt(batch, path, SKILL_FILE, REPORT_SCRIPT)
+    _log(f"batch {batch['id']} written ({len(batch['comments'])} comments) for {deck}")
+    return 200, {"id": batch["id"], "file": str(path), "prompt": prompt, "comments": batch["comments"]}
+
+
+def route_pins_queue(h: "Handler", _body: dict[str, Any]) -> tuple[int, Any]:
+    """GET /pins/queue?path=<deck>: this deck's batches with merged agent reports."""
+    deck = _deck_under_roots(parse_qs(urlsplit(h.path).query).get("path", [""])[0])
+    if deck is None:
+        return 400, {"error": "deck_not_allowed"}
+    return 200, {"batches": queue_lib.list_batches(QUEUE_DIR, deck)}
+
+
+def route_pins_reply(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
+    """POST /pins/reply {path, id, cid, text}: record the user's answer to an agent question.
+
+    The UI also sends the answer to the chat; recording it here puts the comment
+    back to 'sent' in the queue so polling does not resurrect the question.
+    """
+    deck = _deck_under_roots(str(body.get("path", "")))
+    if deck is None:
+        return 400, {"error": "deck_not_allowed"}
+    try:
+        path = queue_lib.batch_path(QUEUE_DIR, str(body.get("id", "")))
+    except ValueError:
+        return 400, {"error": "bad_id"}
+    batch = queue_lib.load_batch(path)
+    if batch is None or batch.get("deckPath") != str(deck.resolve()):
+        return 404, {"error": "unknown_batch"}
+    cid = str(body.get("cid", ""))
+    if cid not in {c["cid"] for c in batch["comments"]}:
+        return 404, {"error": "unknown_cid"}
+    text = str(body.get("text", "")).strip()
+    if not text:
+        return 400, {"error": "empty_reply"}
+    queue_lib.append_reply(path, cid, "sent", text, role="user")
+    return 200, {"ok": True}
+
+
+def route_pins_dismiss(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
+    """POST /pins/dismiss {path, id}: remove a finished batch's files."""
+    deck = _deck_under_roots(str(body.get("path", "")))
+    if deck is None:
+        return 400, {"error": "deck_not_allowed"}
+    try:
+        path = queue_lib.batch_path(QUEUE_DIR, str(body.get("id", "")))
+    except ValueError:
+        return 400, {"error": "bad_id"}
+    batch = queue_lib.load_batch(path)
+    if batch is None or batch.get("deckPath") != str(deck.resolve()):
+        return 404, {"error": "unknown_batch"}
+    for f in (path, queue_lib.replies_path(path)):
+        try:
+            f.unlink()
+        except FileNotFoundError:
+            pass
+    return 200, {"dismissed": batch["id"]}
+
+
 # --- present / pdf --------------------------------------------------------
 def _output_url(deck: Path) -> tuple[str, str] | None:
     """(preview base url, output rel) for a deck whose output exists; None otherwise."""
@@ -456,6 +542,10 @@ ROUTES: dict[tuple[str, str], Route] = {
     ("POST", "/build/info"): route_build_info,
     ("POST", "/build"): route_build,
     ("POST", "/present"): route_present,
+    ("POST", "/pins/send"): route_pins_send,
+    ("GET", "/pins/queue"): route_pins_queue,
+    ("POST", "/pins/reply"): route_pins_reply,
+    ("POST", "/pins/dismiss"): route_pins_dismiss,
     ("GET", "/design"): route_design,
     ("POST", "/design/tokens"): route_design_tokens,
     ("POST", "/pdf"): route_pdf_start,

@@ -106,7 +106,7 @@ class ServerTest(unittest.TestCase):
         code, data = self.request("GET", "/api/status", signed=True)
         self.assertEqual(code, 200)
         self.assertEqual(data["app"], "html-studio")
-        self.assertEqual(data["version"], "0.1.13")
+        self.assertEqual(data["version"], "0.1.14")
         self.assertTrue(data["dataDir"].startswith(self.tmp.name))
 
     def test_signed_unknown_route_is_404(self) -> None:
@@ -237,6 +237,42 @@ class ServerTest(unittest.TestCase):
             code, data = self.request("GET", q, signed=True)
             self.assertTrue(data["tokensStale"])
             self.request("POST", "/api/preview/stop", signed=True, body=json.dumps({"path": str(deck)}).encode())
+            self.request("POST", "/api/roots/remove", signed=True, body=json.dumps({"path": root}).encode())
+
+    def test_pins_send_queue_report_dismiss(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.home()) as root:
+            deck = Path(root) / "deck"
+            (deck / "slides").mkdir(parents=True)
+            (deck / "slides" / "010.html").write_text("<section class='slide'><h1>Title</h1></section>")
+            self.request("POST", "/api/roots/add", signed=True, body=json.dumps({"path": root}).encode())
+            pins = [{"id": "p1", "index": 1, "slideIndex": 0, "slideFile": "slides/010.html", "selector": "h1:nth-of-type(1)",
+                     "tag": "h1", "classes": [], "text": "Title", "rect": {"x": 0, "y": 0, "w": 10, "h": 10}, "comment": "Shorter"}]
+            code, data = self.request("POST", "/api/pins/send", signed=True, body=json.dumps({"path": str(deck), "pins": pins, "language": "ko"}).encode())
+            self.assertEqual(code, 200, data)
+            cid = data["comments"][0]["cid"]
+            self.assertIn(data["file"], data["prompt"])
+            self.assertIn("report.py", data["prompt"])
+            self.assertIn("deck-visual-edit/SKILL.md", data["prompt"])
+            self.assertTrue(Path(data["file"]).is_file())
+
+            q = "/api/pins/queue?path=" + urllib.parse.quote(str(deck))
+            code, qd = self.request("GET", q, signed=True)
+            self.assertEqual((code, len(qd["batches"]), qd["batches"][0]["state"]), (200, 1, "sent"))
+
+            # The agent reports through the CLI named in the prompt.
+            r = subprocess.run([sys.executable, str(Path(__file__).resolve().parents[1] / "report.py"), "--batch", data["file"],
+                                "--cid", cid, "--status", "done", "--text", "Shortened"], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            code, qd = self.request("GET", q, signed=True)
+            b = qd["batches"][0]
+            self.assertEqual((b["state"], b["comments"][0]["status"], b["comments"][0]["thread"][0]["text"]), ("done", "done", "Shortened"))
+
+            code, dd = self.request("POST", "/api/pins/dismiss", signed=True, body=json.dumps({"path": str(deck), "id": b["id"]}).encode())
+            self.assertEqual((code, dd["dismissed"]), (200, b["id"]))
+            code, qd = self.request("GET", q, signed=True)
+            self.assertEqual(qd["batches"], [])
+            code, data = self.request("POST", "/api/pins/send", signed=True, body=json.dumps({"path": str(deck), "pins": []}).encode())
+            self.assertEqual((code, data["error"]), (400, "no_pins"))
             self.request("POST", "/api/roots/remove", signed=True, body=json.dumps({"path": root}).encode())
 
     def test_present_and_pdf_require_output(self) -> None:

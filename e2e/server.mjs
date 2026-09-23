@@ -10,7 +10,7 @@
 //
 // Usage: node server.mjs            (PORT env, default 4173)
 import { createServer } from 'node:http'
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { createHash, createHmac, randomBytes } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, cpSync, rmSync } from 'node:fs'
 import { dirname, extname, join, normalize, resolve } from 'node:path'
@@ -191,6 +191,13 @@ const server = createServer(async (req, res) => {
       await startBackend()
       res.writeHead(200)
       return res.end('reset')
+    }
+    if (p === '/__ctl/report') {
+      // Simulate the agent: run the real report.py the prompt names.
+      const q = url.searchParams
+      const r = spawnSync('python3', [join(repo, 'backend', 'report.py'), '--batch', q.get('batch'), '--cid', q.get('cid'), '--status', q.get('status'), '--text', q.get('text') || ''], { encoding: 'utf-8' })
+      res.writeHead(r.status === 0 ? 200 : 500, { 'Content-Type': 'text/plain' })
+      return res.end(r.status === 0 ? r.stdout : r.stderr)
     }
     if (p === '/__ctl/chat') {
       res.writeHead(200, { 'Content-Type': 'application/json' })

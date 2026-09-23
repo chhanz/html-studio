@@ -115,6 +115,10 @@ export function makeClient(api: AppApi) {
     pdfStart: (path: string) => wrap(api.post<PdfJob>(`${API}/pdf`, { path })),
     pdfStatus: (id: string) => wrap(api.get<PdfJob>(`${API}/pdf?id=${encodeURIComponent(id)}`)),
     reveal: (path: string, file: string) => wrap(api.post<{ revealed: string }>(`${API}/reveal`, { path, file })),
+    pinsSend: (path: string, pins: unknown[], language: string) => wrap(api.post<BatchSent>(`${API}/pins/send`, { path, pins, language })),
+    pinsQueue: (path: string) => wrap(api.get<{ batches: Batch[] }>(`${API}/pins/queue?path=${encodeURIComponent(path)}`)),
+    pinsReply: (path: string, id: string, cid: string, text: string) => wrap(api.post<{ ok: true }>(`${API}/pins/reply`, { path, id, cid, text })),
+    pinsDismiss: (path: string, id: string) => wrap(api.post<{ dismissed: string }>(`${API}/pins/dismiss`, { path, id })),
     design: (path: string) => wrap(api.get<DesignInfo>(`${API}/design?path=${encodeURIComponent(path)}`)),
     writeTokens: (path: string) => wrap(api.post<DesignInfo>(`${API}/design/tokens`, { path })),
   }
@@ -138,3 +142,18 @@ export type DesignInfo = {
 }
 
 export type Client = ReturnType<typeof makeClient>
+
+export type BatchComment = {
+  cid: string
+  index: number
+  pinId: string
+  status: 'sent' | 'done' | 'question'
+  comment: string
+  slideIndex: number
+  slideFile: string
+  selector: string
+  text: string
+  thread: { role: 'agent' | 'user'; text: string; ts: number | null }[]
+}
+export type Batch = { id: string; deck: string; deckPath: string; createdAt: number; state: 'sent' | 'done'; comments: BatchComment[] }
+export type BatchSent = { id: string; file: string; prompt: string; comments: BatchComment[] }

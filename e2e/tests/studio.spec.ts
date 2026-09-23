@@ -445,3 +445,67 @@ test('select-to-edit: clicking an element pins it with file, selector and text; 
   await page.getByRole('button', { name: /^Clear all$/ }).click()
   await expect(page.getByTestId('pins-panel')).toHaveCount(0)
 })
+
+test('pins are sent to the deck chat as a batch; agent reports flow back; questions can be answered', async ({ page }) => {
+  await openApp(page)
+  await addFixtureRoot(page)
+  await selectDeck(page, 'acme-quarterly')
+  const home = await fakeHome(page)
+  await page.getByRole('button', { name: /^Select$/ }).click()
+  const frame = page.frameLocator('[data-testid="slide-stage"] iframe')
+  await frame.locator('.slide h1').click()
+  await page.getByRole('textbox', { name: /Comment for pin 1/ }).fill('Shorter title')
+  await page.locator('#slides-body li').nth(2).click()
+  await frame.locator('img.fixture-img').click()
+
+  // Every draft needs a comment before the batch can go.
+  const send = page.getByTestId('pins-send')
+  await expect(send).toBeDisabled()
+  await expect(page.getByTestId('pins-panel')).toContainText('Every pin needs a comment')
+  await page.getByRole('textbox', { name: /Comment for pin 2/ }).fill('Wider chart')
+  await expect(send).toBeEnabled()
+  await send.click()
+
+  // Both pins are out with the agent; the deck chat got created, briefed and given the batch prompt.
+  await expect(page.getByTestId('pin').nth(0)).toHaveAttribute('data-status', 'sent')
+  await expect(page.getByTestId('pin').nth(1)).toHaveAttribute('data-status', 'sent')
+  // The chat pane now knows the session exists (it was created by the send).
+  await expect(page.getByTestId('deck-chat')).toHaveAttribute('data-status', 'ready')
+  const chat = await (await page.request.get('/__ctl/chat')).json()
+  const sends = chat.log.filter((l: any) => l.path.startsWith('/api/chat?'))
+  expect(sends).toHaveLength(2) // brief + batch
+  const prompt: string = sends[1].body.message
+  expect(prompt).toContain('Visual edit batch')
+  expect(prompt).toContain('2 pinned comments')
+  expect(prompt).toContain('deck-visual-edit/SKILL.md')
+  expect(prompt).toContain('slides/010_cover.html > h1:nth-of-type(1) "Acme Quarterly Review": Shorter title')
+  expect(prompt).toContain('slides/030_uptime.html > img:nth-of-type(1): Wider chart')
+  const batchFile = /Read the batch \(do NOT modify this file\): (\S+)/.exec(prompt)![1]
+  const cids = [...prompt.matchAll(/^- \[([a-z0-9-]+)\]/gm)].map((m) => m[1])
+  expect(cids).toHaveLength(2)
+
+  // The agent reports through report.py: first pin done, second a question.
+  const report = (cid: string, status: string, text: string) =>
+    page.request.get(`/__ctl/report?batch=${encodeURIComponent(batchFile)}&cid=${cid}&status=${status}&text=${encodeURIComponent(text)}`)
+  expect((await report(cids[0], 'done', 'Title shortened to two words')).ok()).toBeTruthy()
+  await expect(page.getByTestId('pin').nth(0)).toHaveAttribute('data-status', 'done', { timeout: 10_000 })
+  await expect(page.getByTestId('pin').nth(0).getByTestId('pin-thread')).toContainText('Title shortened to two words')
+  expect((await report(cids[1], 'question', 'Wider by how much?')).ok()).toBeTruthy()
+  await expect(page.getByTestId('pin').nth(1)).toHaveAttribute('data-status', 'question', { timeout: 10_000 })
+
+  // Answering a question sends a follow-up to the same session and puts the pin back in flight.
+  await page.getByRole('textbox', { name: /Answer the agent's question/ }).fill('Full width')
+  await page.getByRole('button', { name: /^Reply$/ }).click()
+  await expect(page.getByTestId('pin').nth(1)).toHaveAttribute('data-status', 'sent')
+  const chat2 = await (await page.request.get('/__ctl/chat')).json()
+  const follow = chat2.log.filter((l: any) => l.path.startsWith('/api/chat?')).at(-1)
+  expect(follow.body.message).toContain(`Re pin [${cids[1]}]`)
+  expect(follow.body.message).toContain('Full width')
+  expect(chat2.slots).toHaveLength(1)
+
+  // Finished pins can be dismissed; the batch stays until all its pins are done.
+  await page.getByRole('button', { name: /^Dismiss finished$/ }).click()
+  await expect(page.getByTestId('pin')).toHaveCount(1)
+  const queue = await (await page.request.get(`/apps/html-studio/api/pins/queue?path=${encodeURIComponent(`${home}/decks/acme-quarterly`)}`)).json()
+  expect(queue.batches).toHaveLength(1)
+})

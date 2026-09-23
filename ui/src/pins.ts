@@ -32,6 +32,11 @@ export type Pin = Capture & {
   status: PinStatus
   how?: AnchorHow
   createdAt: number
+  /** Set once sent: the batch and the comment id the agent reports with. */
+  batchId?: string
+  batchCid?: string
+  /** Agent reports (and the user's replies) for this pin. */
+  thread?: { role: 'agent' | 'user'; text: string; ts: number | null }[]
 }
 
 export function elementLabel(p: Capture): string {

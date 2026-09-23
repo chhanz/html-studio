@@ -2,6 +2,7 @@ import { useAppApi } from '@kirocrew/app-sdk'
 import { Card, CardTitle, PageHeader } from '@kirocrew/app-sdk/ui'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ApiError, type BackendStatus, type BuildInfo, type BuildResult, type Deck, type DesignInfo, type PdfJob, type PreviewInfo, makeClient } from './api'
+import { openDeckChat } from './chat'
 import { BuildPanel } from './components/BuildPanel'
 import { DeckChat } from './components/DeckChat'
 import { DeckPanel } from './components/DeckPanel'
@@ -188,7 +189,9 @@ export default function HtmlStudio() {
         pushPins()
       } else if (m.type === 'hs-capture' && typeof m.selector === 'string' && preview) {
         const cap = m as unknown as Capture
-        const slideFile = preview.slides[cap.slideIndex] ?? String(cap.slideIndex + 1)
+        // Deck-relative source path the agent will open (single-file decks: the entry itself).
+        const name = preview.slides[cap.slideIndex] ?? String(cap.slideIndex + 1)
+        const slideFile = selected?.kind === 'single' ? selected.entry ?? name : `${selected?.slidesDir ?? 'slides'}/${name}`
         setPins((prev) => {
           const nextIndex = prev.reduce((max, p) => Math.max(max, p.index), 0) + 1
           const pin = newPin(cap, slideFile, nextIndex)
@@ -202,7 +205,7 @@ export default function HtmlStudio() {
     }
     window.addEventListener('message', onMsg)
     return () => window.removeEventListener('message', onMsg)
-  }, [preview, pushPins])
+  }, [preview, pushPins, selected?.kind, selected?.entry, selected?.slidesDir]) // eslint-disable-line react-hooks/exhaustive-deps
   const updatePinComment = useCallback((id: string, comment: string) => setPins((prev) => prev.map((p) => (p.id === id ? { ...p, comment } : p))), [])
   const removePin = useCallback((id: string) => setPins((prev) => prev.filter((p) => p.id !== id)), [])
   const jumpToPin = useCallback((slideIndex: number, id: string) => {
@@ -210,6 +213,93 @@ export default function HtmlStudio() {
     setActivePin(id)
     setViewMode('slides')
   }, [])
+
+  // P2-3: send pins to the deck's chat session as one batch, then follow the
+  // agent's per-pin reports (report.py → queue) until every pin is done.
+  const [sending, setSending] = useState(false)
+  const [chatRefresh, setChatRefresh] = useState(0)
+  const [sendError, setSendError] = useState<string | null>(null)
+  const sendPins = useCallback(async () => {
+    if (!selected || sending) return
+    const drafts = pins.filter((p) => p.status === 'new' && p.comment.trim())
+    if (!drafts.length) return
+    setSending(true)
+    setSendError(null)
+    try {
+      const batch = await client.pinsSend(selected.path, drafts, locale)
+      const { key } = await openDeckChat(api, { deck: selected, preview, build: buildInfo, language: locale }, t('chat.title', { name: selected.name }))
+      await api.post('/api/chat?ws=1', { message: batch.prompt, slot: key, agent: '' })
+      const cidByPin = new Map(batch.comments.map((c) => [c.pinId, c.cid]))
+      setPins((prev) => prev.map((p) => (cidByPin.has(p.id) ? { ...p, status: 'sent', batchId: batch.id, batchCid: cidByPin.get(p.id), thread: [] } : p)))
+      setChatRefresh((k) => k + 1) // the deck chat pane may have looked up before the session existed
+    } catch (e) {
+      setSendError(e instanceof ApiError ? e.code : e instanceof Error ? e.message : 'request_failed')
+    } finally {
+      setSending(false)
+    }
+  }, [api, client, selected, pins, sending, locale, preview, buildInfo, t]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Poll the queue while any pin is out with the agent; a finished batch reloads the preview.
+  const outstanding = pins.some((p) => p.status === 'sent')
+  useEffect(() => {
+    if (!selected || !outstanding) return
+    let alive = true
+    const tick = async () => {
+      try {
+        const { batches } = await client.pinsQueue(selected.path)
+        if (!alive) return
+        const byCid = new Map(batches.flatMap((b) => b.comments.map((c) => [c.cid, { c, state: b.state }] as const)))
+        let completed = false
+        setPins((prev) => {
+          let changed = false
+          const next = prev.map((p) => {
+            const hit = p.batchCid ? byCid.get(p.batchCid) : undefined
+            if (!hit || hit.c.status === p.status) return p
+            changed = true
+            if (hit.c.status === 'done' || hit.c.status === 'question') completed = completed || hit.state === 'done'
+            return { ...p, status: hit.c.status, thread: hit.c.thread }
+          })
+          return changed ? next : prev
+        })
+        if (completed) setReloadKey((k) => k + 1)
+      } catch (e) {
+        console.warn('[html-studio] pins/queue failed', e)
+      }
+    }
+    void tick()
+    const id = setInterval(tick, 3000)
+    return () => {
+      alive = false
+      clearInterval(id)
+    }
+  }, [client, selected?.path, outstanding]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const replyToPin = useCallback(
+    async (id: string, text: string) => {
+      const pin = pins.find((p) => p.id === id)
+      if (!selected || !pin?.batchCid || !pin.batchId) return
+      try {
+        await client.pinsReply(selected.path, pin.batchId, pin.batchCid, text)
+        const { key } = await openDeckChat(api, { deck: selected, preview, build: buildInfo, language: locale }, t('chat.title', { name: selected.name }))
+        const msg = `Re pin [${pin.batchCid}] (${pin.slideFile} > ${pin.selector}): ${text}\nContinue with that comment and report again with report.py (--cid ${pin.batchCid}).`
+        await api.post('/api/chat?ws=1', { message: msg, slot: key, agent: '' })
+        setPins((prev) => prev.map((p) => (p.id === id ? { ...p, status: 'sent', thread: [...(p.thread ?? []), { role: 'user', text, ts: Date.now() }] } : p)))
+      } catch (e) {
+        setSendError(e instanceof ApiError ? e.code : e instanceof Error ? e.message : 'request_failed')
+      }
+    },
+    [api, client, selected, pins, preview, buildInfo, locale, t],
+  )
+  const dismissDone = useCallback(() => {
+    const doneBatches = new Set(pins.filter((p) => p.status === 'done' && p.batchId).map((p) => p.batchId as string))
+    setPins((prev) => prev.filter((p) => p.status !== 'done'))
+    // Batch files whose every pin is gone from the panel can be removed.
+    if (selected) {
+      for (const b of doneBatches) {
+        if (!pins.some((p) => p.batchId === b && p.status !== 'done')) void client.pinsDismiss(selected.path, b).catch(() => undefined)
+      }
+    }
+  }, [pins, selected, client])
 
   // P1-8: DESIGN.md recognition. Read-only until the user asks for tokens.css.
   const [designInfo, setDesignInfo] = useState<DesignInfo | null>(null)
@@ -730,10 +820,15 @@ export default function HtmlStudio() {
                   pins={pins}
                   current={current}
                   activeId={activePin}
+                  sending={sending}
+                  sendError={sendError}
                   onComment={updatePinComment}
                   onRemove={removePin}
                   onJump={jumpToPin}
                   onClearAll={() => setPins([])}
+                  onSend={() => void sendPins()}
+                  onReply={(id, text) => void replyToPin(id, text)}
+                  onDismissDone={dismissDone}
                 />
               </>
             )
@@ -782,7 +877,7 @@ export default function HtmlStudio() {
         {/* Deck chat (under the preview) */}
         <div className="hs-right-chat min-h-0 flex flex-col" style={{ flex: chatOpen ? `0 0 ${Math.round(chatRatio * 1000) / 10}%` : '0 0 auto' }}>
         <Card>
-          <DeckChat t={t} locale={locale} deck={selected} preview={preview} build={buildInfo} open={chatOpen} onToggle={() => setChatOpen(!chatOpen)} />
+          <DeckChat t={t} locale={locale} deck={selected} preview={preview} build={buildInfo} open={chatOpen} onToggle={() => setChatOpen(!chatOpen)} refreshKey={chatRefresh} />
         </Card>
         </div>
         </div>
