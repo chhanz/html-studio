@@ -1014,3 +1014,49 @@ test('slides written outside the studio (the agent) appear in the strip and the 
   await expect(page.frameLocator('[data-testid="slide-stage"] iframe').locator('h1')).toHaveText('Cover rewritten', { timeout: 10000 })
   await expect(page.getByRole('button', { name: /^▸?\s*(Slides|슬라이드)/ }).first()).toContainText('(5)')
 })
+
+test('tweak panel: live colour override in the viewer, apply writes DESIGN.md front matter and tokens.css', async ({ page }) => {
+  await openApp(page)
+  await addFixtureRoot(page)
+  await selectDeck(page, 'acme-quarterly')
+  const home = await fakeHome(page)
+  const deckPath = `${home}/decks/acme-quarterly`
+  await page.getByTestId('toolbar-tweak').click()
+  const panel = page.getByTestId('tweak-panel')
+  await expect(panel).toContainText('Variables declared in DESIGN.md')
+  const primary = panel.locator('[data-var="--color-primary"]')
+  await expect(primary).toBeVisible()
+  await expect(primary.getByRole('textbox').or(primary.locator('input[type=color]'))).toHaveValue('#0f766e')
+
+  // Change the primary colour: the viewer's slide page carries the override at once.
+  await primary.locator('input[type=color]').fill('#aa0000')
+  await expect(primary).toHaveAttribute('data-changed', 'true')
+  await expect(panel).toContainText('1 changed, not applied')
+  const frame = page.frameLocator('[data-testid="slide-stage"] iframe')
+  await expect.poll(() => frame.locator('html').evaluate((el) => getComputedStyle(el).getPropertyValue('--color-primary').trim()), { timeout: 10000 }).toBe('#aa0000')
+  const prev = (await (await page.request.post('/apps/html-studio/api/preview/start', { data: { path: deckPath } })).json()).baseUrl
+  expect(await (await page.request.get(`${prev}/slide/1`)).text()).toContain('--color-primary:#aa0000!important')
+
+  // Revert one: the override goes away.
+  await primary.getByRole('button', { name: 'Revert primary' }).click()
+  await expect(panel).not.toContainText('changed, not applied')
+  await expect.poll(async () => (await (await page.request.get(`${prev}/slide/1`)).text()).includes('--color-primary:')).toBe(false)
+
+  // Change again and apply: DESIGN.md gains front matter with the value, tokens.css is regenerated, no overrides remain.
+  await primary.locator('input[type=color]').fill('#00aa00')
+  await panel.getByRole('button', { name: 'Apply to tokens.css' }).click()
+  await expect(panel.getByRole('status')).toHaveText('Applied')
+  const design = await (await page.request.get(`/__ctl/read?path=${encodeURIComponent(deckPath + '/DESIGN.md')}`)).text()
+  expect(design.startsWith('---')).toBe(true)
+  expect(design).toContain('primary: "#00aa00"')
+  expect(design).toContain('# Acme Lab') // prose kept
+  expect(design).toContain('(`{colors.primary}` — #00aa00)') // prose hex kept in step
+  const tokens = await (await page.request.get(`/__ctl/read?path=${encodeURIComponent(deckPath + '/tokens.css')}`)).text()
+  expect(tokens).toContain('--color-primary: #00aa00;')
+  await expect.poll(async () => {
+    const base = (await (await page.request.post('/apps/html-studio/api/preview/start', { data: { path: deckPath } })).json()).baseUrl
+    const html = await (await page.request.get(`${base}/slide/1`)).text()
+    return html.includes('/tokens.css') && !html.includes('!important;}')
+  }).toBe(true)
+  await expect(page.getByText(/tokens\.css/).first()).toBeVisible()
+})

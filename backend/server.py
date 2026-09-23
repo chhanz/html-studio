@@ -39,6 +39,7 @@ import source as source_lib  # noqa: E402
 import arrange as arrange_lib  # noqa: E402
 import layouts as layouts_lib  # noqa: E402
 import newdeck as newdeck_lib  # noqa: E402
+import tweak as tweak_lib  # noqa: E402
 import notes as notes_lib  # noqa: E402
 import export as export_lib  # noqa: E402
 
@@ -48,7 +49,7 @@ CHECK_JOBS = check_lib.CheckJobs()
 PREVIEWS = preview_lib.PreviewRegistry()
 
 APP_NAME = os.environ.get("KIROCREW_APP_NAME", "html-studio")
-APP_VERSION = "0.1.27"
+APP_VERSION = "0.1.28"
 PORT = int(os.environ.get("PORT", "9100"))
 HOME = Path(os.environ.get("KIROCREW_HOME", str(Path.home() / ".kiro" / "crew")))
 DATA_DIR = HOME / "apps" / APP_NAME / "data"
@@ -548,6 +549,54 @@ def route_slides_add(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
     return _arrange(body, lambda deck, info: {"name": arrange_lib.add(deck, info["slidesDir"], info.get("entry"), after, bool(body.get("duplicate")), content, stem)})
 
 
+# --- tweak panel ------------------------------------------------------------
+def route_tweak_get(h: "Handler", _body: dict[str, Any]) -> tuple[int, Any]:
+    """GET /design/tweak?path=<deck>: the adjustable variables and their current values."""
+    deck = _deck_under_roots(parse_qs(urlsplit(h.path).query).get("path", [""])[0])
+    if deck is None:
+        return 400, {"error": "deck_not_allowed"}
+    return 200, tweak_lib.describe(deck)
+
+
+def route_tweak_preview(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
+    """POST /design/tweak/preview {path, changes}: live overrides for the preview only (no files)."""
+    deck = _deck_under_roots(str(body.get("path", "")))
+    if deck is None:
+        return 400, {"error": "deck_not_allowed"}
+    try:
+        changes = tweak_lib.validate_changes(body.get("changes", {}))
+    except tweak_lib.TweakError as exc:
+        return 400, {"error": exc.code}
+    p = PREVIEWS.get(deck)
+    if p is None:
+        return 409, {"error": "no_preview"}
+    p.overrides_css = tweak_lib.overrides_css(changes)
+    return 200, {"ok": True, "count": len(changes)}
+
+
+def route_tweak_apply(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
+    """POST /design/tweak {path, changes}: write into DESIGN.md and regenerate tokens.css."""
+    deck = _deck_under_roots(str(body.get("path", "")))
+    if deck is None:
+        return 400, {"error": "deck_not_allowed"}
+    try:
+        changes = tweak_lib.validate_changes(body.get("changes", {}))
+        result = tweak_lib.apply(deck, changes)
+    except tweak_lib.TweakError as exc:
+        return 400, {"error": exc.code}
+    except OSError as exc:
+        return 500, {"error": "write_failed", "detail": str(exc)}
+    _log(f"tweaks applied to {deck}: {len(changes)}")
+    # Overrides are now in tokens.css: drop them and restart the preview with the (maybe new) css.
+    info = deck_lib.describe_deck(deck, deck)
+    if info is not None:
+        p = PREVIEWS.ensure(deck, info["slidesDir"], _deck_css(deck), entry=info.get("entry"))
+        p.overrides_css = ""
+        _maybe_rebuild(deck, info, result)
+    result["designInfo"] = _design_payload(deck)
+    return 200, result
+
+
 # --- new deck wizard --------------------------------------------------------
 def route_decks_new(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
     """POST /decks/new {root, folder, title, presenter?, purpose?, audience?, sources?, theme?}.
@@ -863,6 +912,9 @@ ROUTES: dict[tuple[str, str], Route] = {
     ("POST", "/slides/restore"): route_slides_restore,
     ("GET", "/slides/archive"): route_slides_archive_list,
     ("POST", "/decks/new"): route_decks_new,
+    ("GET", "/design/tweak"): route_tweak_get,
+    ("POST", "/design/tweak/preview"): route_tweak_preview,
+    ("POST", "/design/tweak"): route_tweak_apply,
     ("GET", "/layouts"): route_layouts_list,
     ("POST", "/layouts"): route_layouts_save,
     ("POST", "/layouts/delete"): route_layouts_delete,

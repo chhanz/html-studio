@@ -16,6 +16,7 @@ import { Section, useCollapsed } from './components/Section'
 import { SlideStrip, type ArrangeActions } from './components/SlideStrip'
 import { LayoutPicker } from './components/LayoutPicker'
 import { NewDeckDialog } from './components/NewDeckDialog'
+import { TweakPanel } from './components/TweakPanel'
 import { SlideViewer } from './components/SlideViewer'
 import { SmallBtn } from './components/SmallBtn'
 import { ThemeRow } from './components/ThemeRow'
@@ -164,6 +165,8 @@ export default function HtmlStudio() {
   // and reports clicks; pins live here (persisted per deck) and are pushed back
   // to the frame so it can draw and re-anchor the markers.
   const [selectMode, setSelectMode] = useState(false)
+  // P3-7: tweak panel (theme variables, live preview, apply to tokens.css).
+  const [tweakOpen, setTweakOpen] = useState(false)
   const [pins, setPins] = useState<Pin[]>([])
   const [activePin, setActivePin] = useState<string | null>(null)
   const viewerFrame = useRef<HTMLIFrameElement | null>(null)
@@ -1076,6 +1079,9 @@ export default function HtmlStudio() {
               >
                 {t('toolbar.select')}
               </SmallBtn>
+              <SmallBtn onClick={() => setTweakOpen((v) => !v)} active={tweakOpen} aria-pressed={tweakOpen} disabled={!selected || !preview} title={t('toolbar.tweak_hint')} data-testid="toolbar-tweak">
+                {t('toolbar.tweak')}
+              </SmallBtn>
               <SmallBtn
                 onClick={() => void runCheck()}
                 disabled={!preview || checkJob?.state === 'running'}
@@ -1159,6 +1165,8 @@ export default function HtmlStudio() {
               />
             </div>
           )}
+          <div className="flex min-h-0 flex-1" style={{ gap: tweakOpen ? 12 : 0 }}>
+          <div className="flex flex-col min-h-0 min-w-0 flex-1">
           {selected && preview ? (
             viewMode === 'code' && preview.slides[current] ? (
               <div ref={codeViewRef} className="flex flex-col min-h-0 flex-1" data-testid="code-view">
@@ -1258,6 +1266,25 @@ export default function HtmlStudio() {
               )}
             </div>
           )}
+          </div>
+          {tweakOpen && selected && preview && (
+            <div className="min-h-0 flex-none" style={{ width: 300 }}>
+              <TweakPanel
+                t={t}
+                client={client}
+                deckPath={selected.path}
+                onPreview={() => setReloadKey((k) => k + 1)}
+                onApplied={() => {
+                  setReloadKey((k) => k + 1)
+                  void client.previewStart(selected.path).then(setPreview).catch(() => undefined)
+                  void client.design(selected.path).then(setDesignInfo).catch(() => undefined)
+                  void refresh()
+                }}
+                onClose={() => setTweakOpen(false)}
+              />
+            </div>
+          )}
+          </div>
           </div>
         </Card>
         </div>

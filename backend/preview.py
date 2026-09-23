@@ -366,6 +366,9 @@ class DeckPreview:
         # deck's declared build output ("index.html").
         self.extra_files = frozenset(f.strip("/") for f in extra_files if f) | ({css_rel.strip("/")} if css_rel else frozenset())
         self.present = PresentState()
+        # Tweak panel: live theme overrides (a CSS rule) printed into every wrapped
+        # slide page; empty until the studio posts some. Never written to disk here.
+        self.overrides_css = ""
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
 
@@ -445,12 +448,13 @@ class DeckPreview:
                 head_extra=head_extra,
                 title=f"{self.entry}#{index + 1}",
                 page_number=index + 1,
+                extra_css=self.overrides_css,
             )
         files = self.slide_files()
         if index < 0 or index >= len(files):
             return None
         fragment = files[index].read_text(encoding="utf-8", errors="replace")
-        return wrap_slide(fragment, css_href=self._css_href(), title=files[index].name, page_number=index + 1)
+        return wrap_slide(fragment, css_href=self._css_href(), title=files[index].name, page_number=index + 1, extra_css=self.overrides_css)
 
     def presenter_page(self, lang: str = "en") -> str:
         """The presenter window (inject/presenter.html) configured for this deck."""
@@ -581,7 +585,7 @@ class DeckPreview:
             html_src = LAYOUT_RESOLVER(path[len("/layout/"):]) if LAYOUT_RESOLVER else None
             if html_src is None:
                 return _send(h, 404, b"no such layout", "text/plain")
-            return _send(h, 200, wrap_slide(html_src, css_href=self._css_href(), title="layout", page_number=0).encode("utf-8"), "text/html; charset=utf-8")
+            return _send(h, 200, wrap_slide(html_src, css_href=self._css_href(), title="layout", page_number=0, extra_css=self.overrides_css).encode("utf-8"), "text/html; charset=utf-8")
         if path == "/presenter":
             lang = parse_qs(url.query).get("lang", ["en"])[0][:5]
             return _send(h, 200, self.presenter_page(lang).encode("utf-8"), "text/html; charset=utf-8")
@@ -672,9 +676,15 @@ class PreviewRegistry:
             if existing:
                 existing.stop()
             preview = DeckPreview(deck_dir, slides_dir, css_rel, extra_files, entry)
+            if existing:
+                preview.overrides_css = existing.overrides_css  # live tweaks survive a css/extra-files restart
             preview.start()
             self._by_deck[key] = preview
             return preview
+
+    def get(self, deck_dir: Path) -> DeckPreview | None:
+        with self._lock:
+            return self._by_deck.get(str(deck_dir.resolve()))
 
     def stop(self, deck_dir: Path) -> bool:
         key = str(deck_dir.resolve())

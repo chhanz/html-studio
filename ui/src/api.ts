@@ -126,6 +126,10 @@ export function makeClient(api: AppApi) {
     slidesReorder: (path: string, order: string[]) => wrap(api.post<Arranged & { order: string[] }>(`${API}/slides/reorder`, { path, order })),
     slidesAdd: (path: string, after: string | null, duplicate = false, layout?: string) =>
       wrap(api.post<Arranged & { name: string }>(`${API}/slides/add`, layout ? { path, after, duplicate, layout } : { path, after, duplicate })),
+    tweakInfo: (path: string) => wrap(api.get<TweakInfo>(`${API}/design/tweak?path=${encodeURIComponent(path)}`)),
+    tweakPreview: (path: string, changes: Record<string, string>) => wrap(api.post<{ ok: true; count: number }>(`${API}/design/tweak/preview`, { path, changes })),
+    tweakApply: (path: string, changes: Record<string, string>) =>
+      wrap(api.post<{ created: boolean; css: string; unknown: string[]; designInfo: DesignInfo; rebuild?: BuildResult | { skipped: string } }>(`${API}/design/tweak`, { path, changes })),
     deckNew: (req: NewDeckRequest) => wrap(api.post<{ deck: Deck }>(`${API}/decks/new`, req)),
     layouts: () => wrap(api.get<{ items: Layout[] }>(`${API}/layouts`)),
     layoutSave: (path: string, slide: string, name: string) => wrap(api.post<Layout>(`${API}/layouts`, { path, slide, name })),
@@ -202,6 +206,8 @@ export type SlideSource = { slide: string; file: string; kind: 'file' | 'section
 export type SourceSaved = { slide: string; file: string; mtime: number; rebuild?: BuildResult | { skipped: string } }
 export type NewDeckTheme = { kind: 'default' } | { kind: 'design'; accent: string; bg: string; fg: string; font?: string } | { kind: 'copy'; from: string }
 export type NewDeckRequest = { root: string; folder: string; title: string; presenter: string; purpose: string; audience: string; sources: string; theme: NewDeckTheme }
+export type TweakItem = { var: string; group: 'colors' | 'font' | 'typography' | 'spacing' | 'rounded'; name: string; kind: 'color' | 'length' | 'text'; value: string }
+export type TweakInfo = { hasDesign: boolean; items: TweakItem[]; css: string | null }
 export type Layout = { id: string; name: string | null; builtin: boolean; created?: number }
 export type Arranged = { slides: string[]; rebuild?: BuildResult | { skipped: string } }
 export type ArchivedSlide = { name: string; file: string; mtime: number; hasNote: boolean }

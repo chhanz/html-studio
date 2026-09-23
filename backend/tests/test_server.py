@@ -107,7 +107,7 @@ class ServerTest(unittest.TestCase):
         code, data = self.request("GET", "/api/status", signed=True)
         self.assertEqual(code, 200)
         self.assertEqual(data["app"], "html-studio")
-        self.assertEqual(data["version"], "0.1.27")
+        self.assertEqual(data["version"], "0.1.28")
         self.assertTrue(data["dataDir"].startswith(self.tmp.name))
 
     def test_signed_unknown_route_is_404(self) -> None:
@@ -394,6 +394,36 @@ class ServerTest(unittest.TestCase):
             self.assertEqual((code, data["error"]), (400, "bad_theme_source"))
             code, data = self.request("GET", "/api/decks", signed=True)
             self.assertIn("wizard-deck", [d["name"] for d in data["decks"]])
+            self.request("POST", "/api/roots/remove", signed=True, body=json.dumps({"path": root}).encode())
+
+    def test_tweak_routes(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.home()) as root:
+            deck = Path(root) / "deck"
+            (deck / "slides").mkdir(parents=True)
+            (deck / "slides" / "010.html").write_text("<section class='slide'><h1>Hi</h1></section>")
+            self.request("POST", "/api/roots/add", signed=True, body=json.dumps({"path": root}).encode())
+            q = "path=" + urllib.parse.quote(str(deck))
+            code, data = self.request("GET", f"/api/design/tweak?{q}", signed=True)
+            self.assertEqual((code, data["hasDesign"], data["items"][0]["var"]), (200, False, "--hs-accent"))
+            code, data = self.request("POST", "/api/design/tweak/preview", signed=True, body=json.dumps({"path": str(deck), "changes": {"--hs-accent": "#ff0000"}}).encode())
+            self.assertEqual((code, data["error"]), (409, "no_preview"))
+            code, pv = self.request("POST", "/api/preview/start", signed=True, body=json.dumps({"path": str(deck)}).encode())
+            code, data = self.request("POST", "/api/design/tweak/preview", signed=True, body=json.dumps({"path": str(deck), "changes": {"--hs-accent": "#ff0000"}}).encode())
+            self.assertEqual((code, data["count"]), (200, 1))
+            page = urllib.request.urlopen(f"{pv['baseUrl']}/slide/0").read().decode()
+            self.assertIn(":root{--hs-accent:#ff0000!important;}", page)
+            code, data = self.request("POST", "/api/design/tweak", signed=True, body=json.dumps({"path": str(deck), "changes": {"--hs-accent": "#ff0000"}}).encode())
+            self.assertEqual((code, data["created"], data["css"], data["designInfo"]["present"]), (200, True, "tokens.css", True))
+            self.assertIn("--color-primary: #ff0000;", (deck / "tokens.css").read_text())
+            # The preview now serves tokens.css and carries no overrides.
+            code, pv = self.request("POST", "/api/preview/start", signed=True, body=json.dumps({"path": str(deck)}).encode())
+            self.assertEqual(pv["css"], "tokens.css")
+            page = urllib.request.urlopen(f"{pv['baseUrl']}/slide/0").read().decode()
+            self.assertNotIn("!important;}", page)
+            self.assertIn('href="/tokens.css"', page)
+            code, data = self.request("POST", "/api/design/tweak", signed=True, body=json.dumps({"path": str(deck), "changes": {"--color-primary": "nope"}}).encode())
+            self.assertEqual((code, data["error"]), (400, "bad_colour"))
+            self.request("POST", "/api/preview/stop", signed=True, body=json.dumps({"path": str(deck)}).encode())
             self.request("POST", "/api/roots/remove", signed=True, body=json.dumps({"path": root}).encode())
 
     def test_notes_round_trip_and_orphans(self) -> None:
