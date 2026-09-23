@@ -11,7 +11,7 @@ test('boots, connects, shows version and ui build stamp', async ({ page }) => {
   await openApp(page)
   await expect(page.getByRole('status')).toContainText(/Version \d+\.\d+\.\d+/)
   await expect(page.getByRole('status')).toContainText(/ui \d{4}/)
-  await expect(page.getByText(/No decks yet/)).toBeVisible()
+  await expect(page.getByTestId('folders-empty')).toBeVisible()
 })
 
 test('connects automatically once a late backend comes up', async ({ page }) => {
@@ -20,12 +20,13 @@ test('connects automatically once a late backend comes up', async ({ page }) => 
   await page.waitForFunction(() => (window as any).__hsReady === true)
   // While the backend is down: no "No decks" half-state, add/refresh disabled.
   await expect(page.getByRole('status')).toContainText(/Connecting|unreachable/)
-  await expect(page.getByRole('button', { name: /^Add deck$/ })).toBeDisabled()
-  await expect(page.getByText(/No decks yet/)).toHaveCount(0)
+  // While disconnected nothing invites action: no empty state, no Register button.
+  await expect(page.getByTestId('folders-empty')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /^Register folder$/ })).toHaveCount(0)
 
   await page.request.get('/__ctl/backend/start')
   await expect(page.getByRole('status')).toContainText(/Backend connected/, { timeout: 15_000 })
-  await expect(page.getByRole('button', { name: /^Add deck$/ })).toBeEnabled()
+  await expect(page.getByTestId('folders-empty').getByRole('button', { name: /^Register folder$/ })).toBeEnabled()
 })
 
 test('adds a root, lists decks, removes the root', async ({ page }) => {
@@ -35,13 +36,20 @@ test('adds a root, lists decks, removes the root', async ({ page }) => {
   await expect(page.getByRole('option', { name: /acme-built/ })).toContainText('3 slides')
   await expect(page.getByRole('option', { name: /acme-built/ })).toContainText('single file')
 
+  // Folders live behind Manage; New deck is the one primary action while a folder exists.
+  await expect(page.getByTestId('deck-new')).toBeVisible()
+  await expect(page.getByTestId('folders')).toContainText('Folders:')
+  await page.getByRole('button', { name: 'Manage' }).click()
   await page.getByRole('button', { name: /^Remove / }).click()
-  await expect(page.getByText(/No decks yet/)).toBeVisible()
+  // No folder: the empty state explains that finding and creating decks both need one, and offers to register.
+  await expect(page.getByTestId('folders-empty')).toContainText('Register a folder')
+  await expect(page.getByTestId('folders-empty').getByRole('button', { name: /^Register folder$/ })).toBeVisible()
+  await expect(page.getByTestId('deck-new')).toHaveCount(0)
 })
 
 test('rejects a root outside the home directory with a readable error', async ({ page }) => {
   await openApp(page)
-  await page.getByRole('button', { name: /^Add deck$/ }).click()
+  await page.getByRole('button', { name: /^Register folder$/ }).click()
   await page.getByPlaceholder('~/Documents/decks').fill('/usr')
   await page.getByRole('button', { name: /^Add$/ }).click()
   await expect(page.getByRole('alert')).toContainText(/inside your home directory/)

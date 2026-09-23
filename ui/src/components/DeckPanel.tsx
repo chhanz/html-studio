@@ -20,7 +20,7 @@ type Props = {
   onAddRoot: (path?: string) => Promise<void>
   onRemoveRoot: (path: string) => Promise<void>
   onRefresh: () => Promise<void>
-  /** Open the new deck wizard (needs at least one root). */
+  /** Open the new deck wizard (needs at least one folder). */
   onNew?: () => void
 }
 
@@ -36,8 +36,17 @@ function fmtDate(ts: number, locale: string): string {
   }
 }
 
+/**
+ * The deck list. Two layers, kept visually apart: the FOLDERS the studio scans
+ * (a one-line summary with a Manage toggle; registering a folder is a setup
+ * step done once) and the DECKS found in them, with New deck as the one
+ * primary action. With no folder yet, the list area explains that both finding
+ * and creating decks need a folder, and offers to register one right there.
+ * There is no Refresh button: the list re-scans by itself.
+ */
 export function DeckPanel(p: Props) {
   const { t } = p
+  const [manage, setManage] = useState(false)
   const [typing, setTyping] = useState(false)
   const [path, setPath] = useState('')
   const [busy, setBusy] = useState(false)
@@ -63,66 +72,90 @@ export function DeckPanel(p: Props) {
     }
   }
 
+  // Register a folder: the OS picker where available, a typed path otherwise.
+  const registerButton = (primary: boolean) =>
+    p.pickerSupported ? (
+      <SmallBtn onClick={pick} disabled={busy || !p.connected} active={primary} className="inline-flex items-center gap-1.5" data-testid="folder-register">
+        {busy && <Spinner />}
+        {busy ? t('roots.picking') : t('roots.add')}
+      </SmallBtn>
+    ) : (
+      <SmallBtn onClick={() => setTyping((v) => !v)} active={primary || typing} disabled={busy || !p.connected} data-testid="folder-register">
+        {t('roots.add')}
+      </SmallBtn>
+    )
+  const pathForm = typing && (
+    <form
+      className="flex gap-1"
+      onSubmit={(e) => {
+        e.preventDefault()
+        void submitPath()
+      }}
+    >
+      <input
+        autoFocus
+        value={path}
+        onChange={(e) => setPath(e.target.value)}
+        placeholder={t('roots.path_placeholder')}
+        aria-label={t('roots.add')}
+        className="flex-1 min-w-0 px-2 py-1 rounded-md border text-[12px]"
+        style={{ borderColor: 'var(--border)', background: 'var(--bg)', color: 'var(--text)' }}
+      />
+      <SmallBtn active type="submit" disabled={busy || !path.trim()}>
+        {t('roots.confirm')}
+      </SmallBtn>
+    </form>
+  )
+
+  const hasRoots = p.roots.length > 0
+
   return (
     <div className="flex flex-col gap-2 text-[13px]">
-      {/* Roots */}
-      {p.roots.length > 0 && (
-        <ul className="flex flex-col gap-1 m-0 p-0 list-none">
-          {p.roots.map((r) => (
-            <li key={r} className="flex items-center gap-2 text-[12px] text-muted" title={r}>
-              <span className="truncate flex-1">{shortPath(r)}</span>
-              <SmallBtn danger onClick={() => p.onRemoveRoot(r)} aria-label={`${t('roots.remove')} ${r}`}>
-                {t('roots.remove')}
-              </SmallBtn>
-            </li>
-          ))}
-        </ul>
+      {/* Folders: one quiet line, details behind Manage */}
+      {hasRoots && (
+        <div className="flex flex-col gap-1" data-testid="folders">
+          <div className="flex items-center gap-2 text-[12px] text-muted">
+            <span className="truncate flex-1" title={p.roots.join('\n')}>
+              {t('roots.summary', { first: shortPath(p.roots[0]), more: p.roots.length - 1 })}
+              {p.roots.length > 1 ? ` (+${p.roots.length - 1})` : ''}
+            </span>
+            <SmallBtn onClick={() => setManage((v) => !v)} active={manage} aria-expanded={manage} aria-controls="folders-body" style={{ padding: '0 6px' }}>
+              {t('roots.manage')}
+            </SmallBtn>
+          </div>
+          {manage && (
+            <div id="folders-body" className="flex flex-col gap-1 rounded-md border border-border p-2">
+              <ul className="flex flex-col gap-1 m-0 p-0 list-none">
+                {p.roots.map((r) => (
+                  <li key={r} className="flex items-center gap-2 text-[12px] text-muted" title={r}>
+                    <span className="truncate flex-1">{shortPath(r)}</span>
+                    <SmallBtn danger onClick={() => p.onRemoveRoot(r)} aria-label={`${t('roots.remove')} ${r}`} style={{ padding: '0 6px' }}>
+                      {t('roots.remove')}
+                    </SmallBtn>
+                  </li>
+                ))}
+              </ul>
+              <div className="flex flex-wrap items-center gap-1">
+                {registerButton(false)}
+                <SmallBtn onClick={() => p.onRefresh()} disabled={busy || p.loading || !p.connected} className="inline-flex items-center gap-1.5" title={t('roots.rescan_hint')}>
+                  {p.loading && !busy && <Spinner />}
+                  {t('roots.rescan')}
+                </SmallBtn>
+              </div>
+              {pathForm}
+              <p className="m-0 text-[11px] text-muted">{t('roots.hint')}</p>
+            </div>
+          )}
+        </div>
       )}
 
-      {/* Add root: OS picker where available, typed path as the fallback */}
-      <div className="flex flex-wrap items-center gap-1">
-        {p.pickerSupported ? (
-          <SmallBtn onClick={pick} disabled={busy || !p.connected} className="inline-flex items-center gap-1.5">
-            {busy && <Spinner />}
-            {busy ? t('roots.picking') : t('roots.add')}
-          </SmallBtn>
-        ) : (
-          <SmallBtn onClick={() => setTyping((v) => !v)} active={typing} disabled={busy || !p.connected}>
-            {t('roots.add')}
-          </SmallBtn>
-        )}
-        <SmallBtn onClick={() => p.onRefresh()} disabled={busy || p.loading || !p.connected} className="inline-flex items-center gap-1.5">
-          {p.loading && !busy && <Spinner />}
-          {t('roots.refresh')}
+      {/* The one primary action */}
+      {hasRoots && p.onNew && (
+        <SmallBtn onClick={p.onNew} disabled={busy || !p.connected} active data-testid="deck-new" className="self-start">
+          {t('newdeck.button')}
         </SmallBtn>
-        {p.onNew && (
-          <SmallBtn onClick={p.onNew} disabled={busy || !p.connected || !p.roots.length} active title={p.roots.length ? undefined : t('newdeck.needs_root')} data-testid="deck-new">
-            {t('newdeck.button')}
-          </SmallBtn>
-        )}
-      </div>
-      {typing && (
-        <form
-          className="flex gap-1"
-          onSubmit={(e) => {
-            e.preventDefault()
-            void submitPath()
-          }}
-        >
-          <input
-            autoFocus
-            value={path}
-            onChange={(e) => setPath(e.target.value)}
-            placeholder={t('roots.path_placeholder')}
-            aria-label={t('roots.add')}
-            className="flex-1 min-w-0 px-2 py-1 rounded-md border text-[12px]"
-            style={{ borderColor: 'var(--border)', background: 'var(--bg)', color: 'var(--text)' }}
-          />
-          <SmallBtn active type="submit" disabled={busy || !path.trim()}>
-            {t('roots.confirm')}
-          </SmallBtn>
-        </form>
       )}
+
       {p.error && (
         <p className="m-0 text-[12px]" style={{ color: 'var(--danger)' }} role="alert">
           {t(`error.${p.error}`) === `error.${p.error}` ? t('error.generic', { code: p.error }) : t(`error.${p.error}`)}
@@ -132,13 +165,17 @@ export function DeckPanel(p: Props) {
         </p>
       )}
 
-      {/* Deck list */}
+      {/* Deck list, or the empty state that explains why a folder comes first */}
       {!p.connected ? (
         <p className="m-0 text-muted inline-flex items-center gap-2">
           <Spinner /> {t('status.connecting')}
         </p>
-      ) : p.roots.length === 0 ? (
-        <p className="m-0 text-muted">{t('panel.decks.empty')}</p>
+      ) : !hasRoots ? (
+        <div className="flex flex-col gap-2 rounded-md border p-3" style={{ borderStyle: 'dashed' }} data-testid="folders-empty">
+          <p className="m-0 text-muted">{t('panel.decks.empty')}</p>
+          <div>{registerButton(true)}</div>
+          {pathForm}
+        </div>
       ) : p.loading && p.decks.length === 0 ? (
         <p className="m-0 text-muted">{t('decks.loading')}</p>
       ) : p.decks.length === 0 ? (

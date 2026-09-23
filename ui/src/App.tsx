@@ -419,6 +419,23 @@ export default function HtmlStudio() {
     [api, selected, preview, current, locale, buildInfo, t, setChatOpen],
   )
 
+  // The deck list re-scans by itself (a deck folder created elsewhere shows up
+  // without a button), quietly: no loading state, errors ignored.
+  useEffect(() => {
+    if (conn !== 'connected') return
+    const id = setInterval(() => {
+      if (document.visibilityState !== 'visible') return
+      void client
+        .decks()
+        .then((res) => {
+          setRoots(res.roots)
+          setDecks((cur) => (JSON.stringify(cur.map((d) => [d.id, d.slideCount, d.modifiedAt])) === JSON.stringify(res.decks.map((d) => [d.id, d.slideCount, d.modifiedAt])) ? cur : res.decks))
+        })
+        .catch(() => undefined)
+    }, 10000)
+    return () => clearInterval(id)
+  }, [client, conn])
+
   // Watch the selected deck for changes made outside the studio (the agent
   // writing slides, an editor saving): preview/start is idempotent and reports
   // the slide list and the newest mtime, so a light poll keeps the strip and

@@ -20,7 +20,7 @@ export async function openApp(page: Page) {
 /** Add the fixtures folder as a deck root via the typed-path fallback (picker is disabled in e2e). */
 export async function addFixtureRoot(page: Page) {
   const home = await fakeHome(page)
-  await page.getByRole('button', { name: /^Add deck$|^덱 추가$/ }).click()
+  await page.getByRole('button', { name: /^Register folder$|^폴더 등록$/ }).click()
   const input = page.getByPlaceholder('~/Documents/decks')
   await input.fill(`${home}/decks`)
   await page.getByRole('button', { name: /^Add$|^추가$/ }).click()
