@@ -52,6 +52,19 @@ class SplitDeckTests(unittest.TestCase):
             with self.assertRaises(arrange.ArrangeError):
                 arrange.reorder(deck, "slides", None, ["010_cover.html"])  # not a permutation
 
+    def test_dash_convention_is_kept(self) -> None:
+        """A deck named 01-cover / 02-agenda keeps its separator through a swap and an insert."""
+        with tempfile.TemporaryDirectory() as tmp:
+            deck = Path(tmp)
+            (deck / "slides").mkdir()
+            for n in ("01-cover", "02-agenda", "05-coverage", "12-close"):
+                (deck / "slides" / f"{n}.html").write_text("<section class='slide'>x</section>")
+            new = arrange.reorder(deck, "slides", None, ["01-cover.html", "05-coverage.html", "02-agenda.html", "12-close.html"])
+            self.assertEqual(new, ["01-cover.html", "05-coverage.html", "08-agenda.html", "12-close.html"])
+            name = arrange.add(deck, "slides", None, after="01-cover.html", content="<section class='slide'>new</section>")
+            self.assertEqual(name, "03-new.html")
+            self.assertEqual(_names(deck), ["01-cover.html", "03-new.html", "05-coverage.html", "08-agenda.html", "12-close.html"])
+
     def test_add_duplicate_archive_restore(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             deck = _split_deck(tmp)

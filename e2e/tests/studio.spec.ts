@@ -193,6 +193,55 @@ test('external build command: asks for trust once, runs as a job that outlives o
   expect(built).toContain('Acme Quarterly Review 2')
 })
 
+test('a deck shaped like the real ones: own stylesheet, SVG assets, hand-numbered files with gaps, tokens layered under the deck CSS, a swap renames one file', async ({ page }) => {
+  await openApp(page)
+  await addFixtureRoot(page)
+  await selectDeck(page, 'acme-fieldguide')
+  const home = await fakeHome(page)
+  const items = page.locator('#slides-body ol > li')
+  const names = () => items.locator('> button').evaluateAll((els) => els.map((e) => e.getAttribute('title')))
+  // Order follows the file names, gaps and all.
+  await expect(items).toHaveCount(4)
+  expect(await names()).toEqual(['01-cover.html', '02-agenda.html', '05-coverage.html', '12-close.html'])
+
+  // The deck's own stylesheet is what renders; the SVG logo resolves against the deck root.
+  const frame = page.frameLocator('iframe[title="01-cover.html"]').first()
+  await expect(frame.locator('h1')).toHaveCSS('color', 'rgb(124, 45, 18)')
+  expect(await frame.locator('img.logo').evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0)).toBe(true)
+  await expect(page.getByText(/Built-in theme/)).toHaveCount(0)
+  await expect(page.getByText('assets/deck.css', { exact: true })).toBeVisible()
+
+  // The inline SVG chart renders, and the check does not read its interior:
+  // the axis labels carry em dashes that would otherwise be punctuation issues.
+  await items.nth(2).locator('> button').click()
+  const chart = page.frameLocator('iframe[title="05-coverage.html"]').first()
+  await expect(chart.locator('svg.chart rect')).toHaveCount(4)
+  await page.getByRole('button', { name: /^Check$/ }).click()
+  const panel = page.getByTestId('check-panel')
+  await expect(panel).toBeVisible({ timeout: 60_000 })
+  await expect(panel.getByTestId('check-count').filter({ has: page.locator('[data-rule="punctuation"]') })).toHaveCount(0)
+  await expect(panel.getByTestId('check-count').filter({ has: page.locator('[data-rule="broken-image"]') })).toHaveCount(0)
+
+  // Generating tokens.css layers it UNDER assets/deck.css: the stylesheet's
+  // var(--color-primary) now comes from DESIGN.md, so the heading keeps its rust
+  // and the panel says where tokens.css went.
+  await page.getByTestId('theme-row').click()
+  const tweak = page.getByTestId('tweak-panel')
+  await expect(tweak).toContainText("deck's own CSS")
+  await tweak.getByRole('button', { name: /^Generate tokens\.css$/ }).click()
+  await expect(page.getByTestId('theme-row')).toHaveAttribute('data-tokens', 'fresh')
+  const links = () => chart.locator('link[rel="stylesheet"]').evaluateAll((els) => els.map((e) => (e as HTMLLinkElement).getAttribute('href')!.split('?')[0].replace(/^\//, '')))
+  await expect.poll(links).toEqual(['tokens.css', 'assets/deck.css'])
+  await expect(chart.locator('h2')).toHaveCSS('color', 'rgb(31, 41, 55)')
+
+  // Swapping two neighbours renames only one file; the other numbers stay as the author wrote them.
+  await items.nth(1).locator('> button').click()
+  await page.getByRole('button', { name: 'Slide actions' }).click()
+  await page.getByRole('menuitem', { name: 'Move down' }).click()
+  await expect.poll(names).toEqual(['01-cover.html', '05-coverage.html', '08-agenda.html', '12-close.html'])
+  expect((await page.request.get(`/__ctl/read?path=${encodeURIComponent(`${home}/decks/acme-fieldguide/slides/05-coverage.html`)}`)).ok()).toBeTruthy()
+})
+
 test('single-file deck: previews sections, build is disabled with a hint', async ({ page }) => {
   await openApp(page)
   await addFixtureRoot(page)

@@ -1,0 +1,16 @@
+/* Acme field guide: the deck's own stylesheet. It reads the theme's variables
+   (tokens.css, generated from DESIGN.md) with fallbacks, as real decks do. */
+.slide {
+  width: 1280px; height: 720px; box-sizing: border-box; padding: 64px 80px;
+  font-family: var(--font-sans, Georgia, serif);
+  background: var(--color-canvas, #fffdf8);
+  color: var(--color-ink, #1f2937);
+  position: relative; overflow: hidden;
+}
+.slide h1 { font-size: 56px; margin: 0 0 16px; color: var(--color-primary, #7c2d12); }
+.slide h2 { font-size: 40px; margin: 0 0 24px; }
+.eyebrow { font-size: 14px; letter-spacing: .12em; text-transform: uppercase; color: var(--color-primary, #7c2d12); }
+.pill { display: inline-block; padding: 4px 14px; border-radius: 999px; background: var(--color-primary, #7c2d12); color: #fff; font-size: 14px; }
+.logo { position: absolute; right: 80px; bottom: 48px; width: 96px; height: 32px; }
+.chart { width: 640px; height: 320px; display: block; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }

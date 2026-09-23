@@ -57,8 +57,14 @@ def _stem_after_prefix(name: str) -> str:
     return rest or name
 
 
-def _numbered(n: int, rest: str, width: int = 3) -> str:
-    return f"{n:0{max(width, len(str(n)))}d}_{rest}"
+def _numbered(n: int, rest: str, width: int = 3, sep: str = "_") -> str:
+    return f"{n:0{max(width, len(str(n)))}d}{sep}{rest}"
+
+
+def _sep_of(name: str) -> str:
+    """The separator between a file's number and its stem ('05-x' -> '-'), '' when unnumbered."""
+    m = _PREFIX_RE.match(name)
+    return m.group(2) if m and not name.startswith(STAGE) else ""
 
 
 def _number_of(name: str) -> int | None:
@@ -146,18 +152,25 @@ def _rename_all(deck: Path, slides_dir: str, ordered: list[str]) -> list[str]:
     # mixing 3- and 4-digit prefixes is not rewritten to one width.
     keep = _keep_mask(ordered)
     own = [len(m.group(1)) if (m := _PREFIX_RE.match(n)) and not n.startswith(STAGE) else 0 for n in ordered]
+    seps = [_sep_of(n) for n in ordered]
     targets = []
     for i, (num, n) in enumerate(zip(numbers, ordered)):
         if keep[i]:
             targets.append(n)
             continue
-        # A renamed file is padded like the kept neighbour it must sort next to.
-        near = [own[k] for k in (i - 1, i + 1) if 0 <= k < len(own) and keep[k] and own[k]]
-        w = max(near) if near else (own[i] or 3)
-        targets.append(_numbered(num, _stem_after_prefix(n), w))
+        # A renamed file is padded like the kept neighbour it must sort next to,
+        # and keeps its own number separator ('05-x' stays 'NN-x'); a new file
+        # takes the separator its neighbours use, so the author's convention holds.
+        near = [k for k in (i - 1, i + 1) if 0 <= k < len(own) and keep[k] and own[k]]
+        w = max(own[k] for k in near) if near else (own[i] or 3)
+        sep = seps[i] or (seps[near[0]] if near else "_")
+        targets.append(_numbered(num, _stem_after_prefix(n), w, sep))
     if len(set(targets)) != len(targets):
         # Two slides share the same stem: fall back to the full old name after the number.
-        targets = [t if targets.count(t) == 1 else _numbered(num, n, len(t.split("_", 1)[0])) for num, (n, t) in zip(numbers, zip(ordered, targets))]
+        targets = [
+            t if targets.count(t) == 1 else _numbered(num, n, len(_PREFIX_RE.match(t).group(1)), _sep_of(t) or "_")
+            for num, (n, t) in zip(numbers, zip(ordered, targets))
+        ]
     changes = [(o, n) for o, n in zip(ordered, targets) if o != n]
     if not changes:
         return targets
