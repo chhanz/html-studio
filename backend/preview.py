@@ -23,6 +23,7 @@ import json
 import mimetypes
 import re
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -219,6 +220,61 @@ def inject_present_helper(page: str) -> str:
     return page + PRESENT_HELPER_JS
 
 
+class PresentState:
+    """Shared presenter state for one deck, relayed through the preview server.
+
+    The presenter view (inside the dashboard) and the audience window (a system
+    browser) are different browser processes, so nothing client-side can link
+    them; both talk to this loopback server instead. Only slide index, blackout
+    and laser coordinates live here, so it needs no authentication.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.seq = 0
+        self.index = 0
+        self.black = False
+        self.laser: dict[str, Any] = {"on": False, "x": 0, "y": 0}
+        self.presenter_seen = 0.0
+        self.audience_seen = 0.0
+
+    def snapshot(self) -> dict[str, Any]:
+        now = time.time()
+        with self._lock:
+            return {
+                "seq": self.seq,
+                "index": self.index,
+                "black": self.black,
+                "laser": dict(self.laser),
+                "presenter": now - self.presenter_seen < 5,
+                "audience": now - self.audience_seen < 5,
+            }
+
+    def update(self, body: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            who = body.get("from")
+            if who == "presenter":
+                self.presenter_seen = time.time()
+            elif who == "audience":
+                self.audience_seen = time.time()
+            changed = False
+            if isinstance(body.get("index"), int) and body["index"] >= 0 and body["index"] != self.index:
+                self.index = body["index"]
+                changed = True
+            if isinstance(body.get("black"), bool) and body["black"] != self.black:
+                self.black = body["black"]
+                changed = True
+            laser = body.get("laser")
+            if isinstance(laser, dict):
+                new = {"on": bool(laser.get("on")), "x": int(laser.get("x") or 0), "y": int(laser.get("y") or 0)}
+                if new != self.laser:
+                    self.laser = new
+                    changed = True
+            if changed:
+                self.seq += 1
+        return self.snapshot()
+
+
 class DeckPreview:
     """One running preview server for one deck folder."""
 
@@ -238,6 +294,7 @@ class DeckPreview:
         # Individual files outside the static prefixes that may be served, e.g. the
         # deck's declared build output ("index.html").
         self.extra_files = frozenset(f.strip("/") for f in extra_files if f) | ({css_rel.strip("/")} if css_rel else frozenset())
+        self.present = PresentState()
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
 
@@ -246,6 +303,13 @@ class DeckPreview:
         preview = self
 
         class Handler(BaseHTTPRequestHandler):
+            def do_POST(self) -> None:  # noqa: N802
+                preview._handle_post(self)
+
+            def do_OPTIONS(self) -> None:  # noqa: N802
+                # CORS preflight for /present/state from the dashboard (another loopback port).
+                _send(self, 204, b"", "text/plain", cors=_cors_origin(self))
+
             def do_GET(self) -> None:  # noqa: N802
                 preview._handle(self)
 
@@ -369,9 +433,24 @@ class DeckPreview:
         return target if target.is_file() else None
 
     # --- dispatch
+    def _handle_post(self, h: BaseHTTPRequestHandler) -> None:
+        path = urlsplit(h.path).path
+        if path != "/present/state":
+            return _send(h, 404, b"not found", "text/plain")
+        try:
+            n = int(h.headers.get("Content-Length") or 0)
+            body = json.loads(h.rfile.read(n).decode("utf-8") or "{}") if n else {}
+        except (ValueError, OSError):
+            return _send(h, 400, b"bad json", "text/plain")
+        if not isinstance(body, dict):
+            return _send(h, 400, b"bad json", "text/plain")
+        return _send(h, 200, json.dumps(self.present.update(body)).encode("utf-8"), "application/json", cors=_cors_origin(h))
+
     def _handle(self, h: BaseHTTPRequestHandler) -> None:
         url = urlsplit(h.path)
         path = url.path
+        if path == "/present/state":
+            return _send(h, 200, json.dumps(self.present.snapshot()).encode("utf-8"), "application/json", cors=_cors_origin(h))
         if path == "/health":
             return _send(h, 200, b'{"status":"ok"}', "application/json")
         if path == "/check":
@@ -386,11 +465,8 @@ class DeckPreview:
             page = self.render_slide(idx)
             if page is None:
                 return _send(h, 404, b"no such slide", "text/plain")
-            modes = parse_qs(url.query).get("hs", [])
-            if "select" in modes:
+            if "select" in parse_qs(url.query).get("hs", []):
                 page = inject_select_helper(page)
-            elif "relay" in modes:
-                page = _inject_script(page, (_INJECT_DIR / "relay.js").read_text(encoding="utf-8"))
             return _send(h, 200, page.encode("utf-8"), "text/html; charset=utf-8")
         target = self.resolve_static(path)
         if target is None:
@@ -406,12 +482,26 @@ class DeckPreview:
         return _send(h, 200, data, ctype)
 
 
-def _send(h: BaseHTTPRequestHandler, code: int, body: bytes, ctype: str) -> None:
+_LOOPBACK_ORIGIN_RE = re.compile(r"^https?://(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$")
+
+
+def _cors_origin(h: BaseHTTPRequestHandler) -> str | None:
+    """Echo a loopback Origin (the dashboard on another port); anything else gets no CORS."""
+    origin = h.headers.get("Origin") or ""
+    return origin if _LOOPBACK_ORIGIN_RE.match(origin) else None
+
+
+def _send(h: BaseHTTPRequestHandler, code: int, body: bytes, ctype: str, cors: str | None = None) -> None:
     try:
         h.send_response(code)
         h.send_header("Content-Type", ctype)
         h.send_header("Content-Length", str(len(body)))
         h.send_header("Cache-Control", "no-store")
+        if cors:
+            h.send_header("Access-Control-Allow-Origin", cors)
+            h.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            h.send_header("Access-Control-Allow-Headers", "Content-Type")
+            h.send_header("Vary", "Origin")
         h.end_headers()
         h.wfile.write(body)
     except (BrokenPipeError, ConnectionResetError):

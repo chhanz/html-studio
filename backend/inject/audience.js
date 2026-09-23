@@ -2,24 +2,20 @@
 //
 // Injected by the preview server into the built deck when it is opened with
 // ?hs=audience (the "Audience window" button opens that URL in the system
-// browser). The presenter view inside the studio shows a slide of the same
-// preview server, so both windows share an origin and a BroadcastChannel
-// named after the deck port. Protocol (all messages carry `from`):
+// browser). The presenter view runs inside the dashboard, a different browser
+// process, so the two sides meet at the preview server: both poll and post
+// /present/state on the same loopback origin.
 //
-//   presenter -> audience  { type: 'goto', index }          show slide (0-based)
-//   presenter -> audience  { type: 'laser', x, y, on }      pointer in stage coords (1280x720), on=false hides
-//   presenter -> audience  { type: 'black', on }            blank the screen
-//   presenter -> audience  { type: 'ping' }                 are you there?
-//   audience  -> presenter { type: 'hello' | 'pong', index } presence (+ current slide)
-//   audience  -> presenter { type: 'slide', index }          the deck moved on its own (keys in this window)
+//   GET  /present/state -> { seq, index, black, laser:{on,x,y}, presenter, audience }
+//   POST /present/state <- { from:'audience', index? }   (heartbeat + own navigation)
 //
-// Nothing here calls the backend; it only drives the deck's own runtime via the
-// URL hash (every runtime we know follows #N) and paints an overlay canvas.
+// This script drives the deck's own runtime through the URL hash (every runtime
+// we know follows #N), paints the laser dot and the blackout, and adds two keys
+// for the projector machine: F = fullscreen, B = black screen.
 (function () {
   'use strict'
   var STAGE_W = 1280, STAGE_H = 720
-  var channel = new BroadcastChannel('hs-present-' + location.port)
-  var me = 'audience'
+  var STATE = '/present/state'
 
   function currentIndex() {
     var n = parseInt(location.hash.slice(1), 10)
@@ -27,24 +23,28 @@
   }
   function goto(index) {
     var want = '#' + (index + 1)
-    lastIndex = index // set by the presenter: do not echo it back as our own move
     if (location.hash !== want) location.hash = want
   }
-  var lastIndex = 0
+  function post(obj) {
+    obj.from = 'audience'
+    return fetch(STATE, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(obj) })
+      .then(function (r) { return r.json() })
+      .catch(function () { return null })
+  }
 
   // --- laser + blackout overlay ---------------------------------------------
   var layer = document.createElement('div')
   layer.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:2147483000'
   var dot = document.createElement('div')
+  dot.id = 'hs-laser'
   dot.style.cssText = 'position:absolute;width:18px;height:18px;margin:-9px 0 0 -9px;border-radius:50%;background:rgba(255,40,40,.95);box-shadow:0 0 12px 4px rgba(255,40,40,.55);display:none'
   var black = document.createElement('div')
+  black.id = 'hs-black'
   black.style.cssText = 'position:absolute;inset:0;background:#000;display:none'
   layer.appendChild(black)
   layer.appendChild(dot)
   document.body.appendChild(layer)
 
-  // The deck scales its 1280x720 stage to the window; find the stage box to map
-  // presenter coordinates. Fall back to a centred 16:9 box.
   function stageBox() {
     var el = document.querySelector('.stage, .hs-stage, .presentation .slide.active, .slide.active')
     if (el) {
@@ -55,39 +55,63 @@
     var s = Math.min(w / STAGE_W, h / STAGE_H)
     return { left: (w - STAGE_W * s) / 2, top: (h - STAGE_H * s) / 2, width: STAGE_W * s, height: STAGE_H * s }
   }
-  function laser(x, y, on) {
-    if (!on) {
+  function laser(l) {
+    if (!l || !l.on) {
       dot.style.display = 'none'
       return
     }
     var b = stageBox()
     dot.style.display = 'block'
-    dot.style.left = b.left + (x / STAGE_W) * b.width + 'px'
-    dot.style.top = b.top + (y / STAGE_H) * b.height + 'px'
+    dot.style.left = b.left + (l.x / STAGE_W) * b.width + 'px'
+    dot.style.top = b.top + (l.y / STAGE_H) * b.height + 'px'
   }
 
-  channel.onmessage = function (e) {
-    var m = e.data || {}
-    if (m.from === me) return
-    if (m.type === 'goto' && typeof m.index === 'number') goto(m.index)
-    else if (m.type === 'laser') laser(m.x, m.y, m.on !== false)
-    else if (m.type === 'black') black.style.display = m.on ? 'block' : 'none'
-    else if (m.type === 'ping') channel.postMessage({ from: me, type: 'pong', index: currentIndex() })
+  // --- follow the presenter --------------------------------------------------
+  var applied = -1 // last seq applied
+  var lastOwn = currentIndex()
+  function apply(st) {
+    if (!st) return
+    if (st.seq !== applied) {
+      applied = st.seq
+      if (typeof st.index === 'number' && st.index !== currentIndex()) {
+        lastOwn = st.index
+        goto(st.index)
+      }
+      black.style.display = st.black ? 'block' : 'none'
+    }
+    laser(st.laser)
   }
-  // Runtimes tend to update the hash with history.replaceState, which fires no
-  // hashchange; watch the hash instead so keys pressed in THIS window still
-  // report the slide to the presenter.
-  lastIndex = currentIndex()
+  function poll() {
+    fetch(STATE).then(function (r) { return r.json() }).then(apply).catch(function () {})
+  }
+  setInterval(poll, 120)
+  poll()
+
+  // Own navigation (clicker on this machine): runtimes tend to change the hash
+  // with replaceState, which fires no hashchange, so watch the hash.
   function report() {
     var i = currentIndex()
-    if (i === lastIndex) return
-    lastIndex = i
-    channel.postMessage({ from: me, type: 'slide', index: i })
+    if (i === lastOwn) return
+    lastOwn = i
+    post({ index: i }).then(apply)
   }
   addEventListener('hashchange', report)
   setInterval(report, 150)
-  addEventListener('beforeunload', function () {
-    channel.postMessage({ from: me, type: 'bye' })
-  })
-  channel.postMessage({ from: me, type: 'hello', index: currentIndex() })
+  setInterval(function () { post({}) }, 2000) // heartbeat for the presence indicator
+  post({ index: currentIndex() })
+
+  // Projector-side keys.
+  addEventListener('keydown', function (e) {
+    if (e.metaKey || e.ctrlKey || e.altKey) return
+    if (e.key === 'f' || e.key === 'F') {
+      e.preventDefault()
+      if (document.fullscreenElement) document.exitFullscreen && document.exitFullscreen()
+      else if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(function () {})
+    } else if (e.key === 'b' || e.key === 'B') {
+      e.preventDefault()
+      var on = black.style.display !== 'block'
+      black.style.display = on ? 'block' : 'none'
+      post({ black: on }).then(apply)
+    }
+  }, true)
 })()

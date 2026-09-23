@@ -646,7 +646,7 @@ test('speaker notes: autosaves notes/<slide>.md, marks the thumbnail, survives r
   await expect(page.locator('#slides-body li').nth(0).getByTestId('strip-note')).toHaveCount(0)
 })
 
-test('presenter view: notes, next slide, timer; drives and follows a real audience window; laser and black', async ({ page, context }) => {
+test('presenter view: notes, next slide, timer; drives and follows an audience window in ANOTHER browser; laser and black', async ({ page, browser }) => {
   await openApp(page)
   await addFixtureRoot(page)
   await selectDeck(page, 'acme-quarterly')
@@ -669,7 +669,10 @@ test('presenter view: notes, next slide, timer; drives and follows a real audien
   // "Audience window" asks the backend for the URL (no browser launch in tests); open it ourselves.
   const audienceUrl = (await (await page.request.post('/apps/html-studio/api/present', { data: { path: deckPath, slide: 1, mode: 'audience' } })).json()).url as string
   expect(audienceUrl).toMatch(/\/out\/index\.html\?hs=audience#1$/)
-  const audience = await context.newPage()
+  // A separate browser context: no shared storage, cookies or BroadcastChannel,
+  // like the real system browser next to the dashboard.
+  const other = await browser.newContext()
+  const audience = await other.newPage()
   await audience.goto(audienceUrl)
   await expect(audience.locator('#hs-counter')).toHaveText('1 / 4')
   await expect(view).toHaveAttribute('data-audience', 'connected')
@@ -692,20 +695,26 @@ test('presenter view: notes, next slide, timer; drives and follows a real audien
   const box = (await stage.boundingBox())!
   await page.mouse.move(box.x + box.width * 0.25, box.y + box.height * 0.5)
   await expect(view).toContainText('laser')
-  const dot = audience.locator('div[style*="rgba(255, 40, 40"]')
+  const dot = audience.locator('#hs-laser')
   await expect(dot).toBeVisible()
   await page.mouse.move(5, 5) // off the slide
   await expect(dot).toBeHidden()
 
-  // Black screen toggles in the audience window.
+  // Black screen: from the presenter (B) and from the audience window itself (B), both ways.
+  const black = audience.locator('#hs-black')
   await page.keyboard.press('b')
-  await expect(audience.locator('div[style*="background: rgb(0, 0, 0)"][style*="display: block"]')).toHaveCount(1)
+  await expect(black).toBeVisible()
   await page.keyboard.press('b')
-  await expect(audience.locator('div[style*="background: rgb(0, 0, 0)"][style*="display: block"]')).toHaveCount(0)
+  await expect(black).toBeHidden()
+  await audience.keyboard.press('b')
+  await expect(black).toBeVisible()
+  await expect(page.getByRole('button', { name: /^Black$/ })).toHaveAttribute('aria-pressed', 'true')
+  await audience.keyboard.press('b')
+  await expect(black).toBeHidden()
 
   // Esc closes the presenter and the studio lands on the slide we ended on.
   await page.keyboard.press('Escape')
   await expect(view).toHaveCount(0)
   await expect(page.getByText('3 / 4')).toBeVisible()
-  await audience.close()
+  await other.close()
 })

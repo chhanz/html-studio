@@ -20,13 +20,15 @@ type Props = {
 }
 
 type Presence = 'none' | 'connected'
+type PresentStateWire = { seq: number; index: number; black: boolean; laser: { on: boolean; x: number; y: number }; presenter: boolean; audience: boolean }
 
 /**
  * Presenter view (P3-6): what the speaker sees. Current slide (move the mouse
  * over it to point a laser in the audience window), next slide, speaker notes,
  * elapsed time and clock. The audience window is the built deck opened in the
- * system browser with ?hs=audience (inject/audience.js); both sides share the
- * preview server's origin, so a BroadcastChannel keyed by its port links them.
+ * system browser with ?hs=audience (inject/audience.js). It runs in another
+ * browser process, so the two sides are linked through the deck's preview
+ * server: both post and poll /present/state on its loopback origin.
  *
  * The view itself is the presenter's screen: it never goes fullscreen on its
  * own (the audience window does, via the browser), and Esc closes it.
@@ -44,71 +46,60 @@ export function PresenterView({ t, client, deckPath, preview, outputUrl, start, 
   const indexRef = useRef(index)
   indexRef.current = index
 
-  // The studio and the audience window are different origins, so the current
-  // slide iframe (same origin as the audience) relays for us: postMessage in,
-  // BroadcastChannel out, and back (inject/relay.js).
-  const relayRef = useRef<HTMLIFrameElement | null>(null)
-  const relayReady = useRef(false)
-  const queued = useRef<Record<string, unknown>[]>([])
-  const send = useCallback((msg: Record<string, unknown>) => {
-    const w = relayRef.current?.contentWindow
-    const full = { from: 'presenter', ...msg }
-    if (!w || !relayReady.current) {
-      queued.current.push(full)
-      return
-    }
-    w.postMessage({ type: 'hs-relay', msg: full }, '*')
-  }, [])
+  // The audience window is another browser process, so the two sides meet at
+  // the deck's preview server (loopback): we POST our moves and poll its state.
+  const stateUrl = `${preview.baseUrl}/present/state`
+  const seqRef = useRef(-1)
+  const post = useCallback(
+    async (body: Record<string, unknown>) => {
+      try {
+        const r = await fetch(stateUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: 'presenter', ...body }) })
+        return (await r.json()) as PresentStateWire
+      } catch {
+        return null
+      }
+    },
+    [stateUrl],
+  )
   const blackRef = useRef(black)
   blackRef.current = black
-
   useEffect(() => {
-    let seen: ReturnType<typeof setTimeout> | null = null
-    const alive = () => {
-      setPresence('connected')
-      if (seen) clearTimeout(seen)
-      seen = setTimeout(() => setPresence('none'), 6000)
-    }
-    const onMsg = (e: MessageEvent) => {
-      if (e.source !== relayRef.current?.contentWindow) return
-      const d = e.data as { type?: string; msg?: { from?: string; type?: string; index?: number } }
-      if (!d) return
-      if (d.type === 'hs-relay-ready') {
-        relayReady.current = true
-        const q = queued.current.splice(0)
-        for (const m of q) relayRef.current?.contentWindow?.postMessage({ type: 'hs-relay', msg: m }, '*')
-        send({ type: 'ping' })
-        return
+    let alive = true
+    const tick = async () => {
+      try {
+        const st = (await (await fetch(stateUrl)).json()) as PresentStateWire
+        if (!alive) return
+        setPresence(st.audience ? 'connected' : 'none')
+        if (st.seq !== seqRef.current) {
+          seqRef.current = st.seq
+          if (typeof st.index === 'number' && st.index !== indexRef.current) setIndex(Math.min(Math.max(0, st.index), total - 1))
+          if (typeof st.black === 'boolean' && st.black !== blackRef.current) setBlack(st.black)
+        }
+      } catch {
+        /* preview restarting: keep trying */
       }
-      if (d.type !== 'hs-relay' || !d.msg || d.msg.from !== 'audience') return
-      const m = d.msg
-      if (m.type === 'hello' || m.type === 'pong') {
-        alive()
-        send({ type: 'goto', index: indexRef.current })
-        send({ type: 'black', on: blackRef.current })
-      } else if (m.type === 'slide' && typeof m.index === 'number') {
-        alive()
-        if (m.index !== indexRef.current) setIndex(Math.min(Math.max(0, m.index), total - 1))
-      } else if (m.type === 'bye') setPresence('none')
     }
-    window.addEventListener('message', onMsg)
-    const ping = setInterval(() => send({ type: 'ping' }), 4000)
+    void tick()
+    const id = setInterval(tick, 200)
     return () => {
-      window.removeEventListener('message', onMsg)
-      clearInterval(ping)
-      if (seen) clearTimeout(seen)
+      alive = false
+      clearInterval(id)
     }
-  }, [send, total])
-  // The relay frame reloads with every slide change: mark it not ready until it says so.
-  useEffect(() => {
-    relayReady.current = false
-  }, [index])
+  }, [stateUrl, total])
+  const send = useCallback(
+    (msg: Record<string, unknown>) => {
+      void post(msg).then((st) => {
+        if (st) seqRef.current = st.seq
+      })
+    },
+    [post],
+  )
 
   useEffect(() => {
-    send({ type: 'goto', index })
+    send({ index })
   }, [index, send])
   useEffect(() => {
-    send({ type: 'black', on: black })
+    send({ black })
   }, [black, send])
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000)
@@ -128,10 +119,7 @@ export function PresenterView({ t, client, deckPath, preview, outputUrl, start, 
   }, [client, deckPath, preview.slides, index])
   useEffect(
     () => () => {
-      // Best effort: the relay frame is going away with us.
-      const w = relayRef.current?.contentWindow
-      w?.postMessage({ type: 'hs-relay', msg: { from: 'presenter', type: 'laser', on: false } }, '*')
-      w?.postMessage({ type: 'hs-relay', msg: { from: 'presenter', type: 'black', on: false } }, '*')
+      void post({ laser: { on: false, x: 0, y: 0 }, black: false })
       onPosition(indexRef.current)
     },
     [], // eslint-disable-line react-hooks/exhaustive-deps
@@ -166,12 +154,16 @@ export function PresenterView({ t, client, deckPath, preview, outputUrl, start, 
     const y = ((e.clientY - r.top) / r.height) * preview.stage.height
     const inside = x >= 0 && y >= 0 && x <= preview.stage.width && y <= preview.stage.height
     setLaserOn(inside)
-    send({ type: 'laser', x: Math.round(x), y: Math.round(y), on: inside })
+    const now = performance.now()
+    if (inside && now - lastLaser.current < 40) return // ~25 updates/s is plenty for a pointer
+    lastLaser.current = now
+    send({ laser: { on: inside, x: Math.round(x), y: Math.round(y) } })
   }
   const onLeave = () => {
     setLaserOn(false)
-    send({ type: 'laser', on: false })
+    send({ laser: { on: false, x: 0, y: 0 } })
   }
+  const lastLaser = useRef(0)
   const openAudience = async () => {
     try {
       await client.present(deckPath, index + 1, 'audience')
@@ -202,7 +194,7 @@ export function PresenterView({ t, client, deckPath, preview, outputUrl, start, 
           <SmallBtn onClick={() => void openAudience()} disabled={!outputUrl} title={outputUrl ? t('presenter.open_audience_hint') : t('present.need_output')} style={btn} data-testid="presenter-open-audience">
             {t('presenter.open_audience')} ↗
           </SmallBtn>
-          <SmallBtn onClick={() => setBlack((v) => !v)} active={black} style={btn} title={t('presenter.black_hint')}>
+          <SmallBtn onClick={() => setBlack((v) => !v)} active={black} aria-pressed={black} style={btn} title={t('presenter.black_hint')}>
             {t('presenter.black')}
           </SmallBtn>
           <SmallBtn onClick={onClose} style={btn}>{t('present.close')}</SmallBtn>
@@ -216,20 +208,7 @@ export function PresenterView({ t, client, deckPath, preview, outputUrl, start, 
             {laserOn && <span style={{ color: '#f87171' }}>{t('presenter.laser_on')}</span>}
           </div>
           <div ref={stageRef} className="flex-1 min-h-0 relative" onMouseMove={onMove} onMouseLeave={onLeave} style={{ cursor: 'crosshair' }} data-testid="presenter-current">
-            <SlideFrame
-              src={`${preview.baseUrl}/slide/${index}?hs=relay`}
-              stageWidth={preview.stage.width}
-              stageHeight={preview.stage.height}
-              title={preview.slides[index]}
-              fit="contain"
-              className="rounded-md"
-              interactive
-              frameRef={(el) => {
-                relayRef.current = el
-              }}
-            />
-            {/* the frame only relays; keep the pointer on this layer for the laser */}
-            <div className="absolute inset-0" />
+            <SlideFrame src={`${preview.baseUrl}/slide/${index}`} stageWidth={preview.stage.width} stageHeight={preview.stage.height} title={preview.slides[index]} fit="contain" className="rounded-md" />
           </div>
         </div>
         <div className="min-h-0 flex flex-col gap-1">

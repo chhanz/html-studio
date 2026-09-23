@@ -4,6 +4,7 @@ Run:  python3 -m unittest backend/tests/test_preview.py
 """
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import unittest
@@ -258,20 +259,6 @@ class PresentHelperTests(unittest.TestCase):
             finally:
                 p.stop()
 
-    def test_relay_injected_on_slide_with_relay_query(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            deck = Path(tmp) / "deck"
-            (deck / "slides").mkdir(parents=True)
-            (deck / "slides" / "010.html").write_text("<section class='slide'>x</section>")
-            p = preview.DeckPreview(deck, "slides", None)
-            port = p.start()
-            try:
-                page = urllib.request.urlopen(f"http://127.0.0.1:{port}/slide/0?hs=relay").read()
-                self.assertIn(b"hs-relay-ready", page)
-                self.assertNotIn(b"hs-capture", page)
-            finally:
-                p.stop()
-
     def test_audience_bridge_injected_with_audience_query(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             deck = Path(tmp) / "deck"
@@ -283,8 +270,44 @@ class PresentHelperTests(unittest.TestCase):
             port = p.start()
             try:
                 body = urllib.request.urlopen(f"http://127.0.0.1:{port}/out/index.html?hs=audience").read()
-                self.assertIn(b"BroadcastChannel('hs-present-'", body)
+                self.assertIn(b"/present/state", body)
+                self.assertIn(b"hs-laser", body)
                 self.assertNotIn(b"hs-hit", body)  # the presenter helper is a different mode
+            finally:
+                p.stop()
+
+    def test_present_state_relay(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            deck = Path(tmp) / "deck"
+            (deck / "slides").mkdir(parents=True)
+            (deck / "slides" / "010.html").write_text("<section class='slide'>x</section>")
+            p = preview.DeckPreview(deck, "slides", None)
+            port = p.start()
+            base = f"http://127.0.0.1:{port}/present/state"
+            try:
+                st = json.loads(urllib.request.urlopen(base).read())
+                self.assertEqual((st["seq"], st["index"], st["black"], st["presenter"], st["audience"]), (0, 0, False, False, False))
+                def post(obj):
+                    req = urllib.request.Request(base, data=json.dumps(obj).encode(), method="POST", headers={"Content-Type": "application/json"})
+                    return json.loads(urllib.request.urlopen(req).read())
+                st = post({"from": "presenter", "index": 3, "laser": {"on": True, "x": 100, "y": 200}})
+                self.assertEqual((st["seq"], st["index"], st["laser"], st["presenter"], st["audience"]), (1, 3, {"on": True, "x": 100, "y": 200}, True, False))
+                st = post({"from": "audience"})  # heartbeat only, nothing changes
+                self.assertEqual((st["seq"], st["audience"]), (1, True))
+                st = post({"from": "audience", "index": 4, "black": True})
+                self.assertEqual((st["seq"], st["index"], st["black"]), (2, 4, True))
+                st = post({"from": "audience", "index": "nope", "black": "yes"})  # ignored types
+                self.assertEqual((st["seq"], st["index"], st["black"]), (2, 4, True))
+                with self.assertRaises(urllib.error.HTTPError) as ctx:
+                    urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{port}/slide/0", data=b"{}", method="POST"))
+                ctx.exception.close()
+                # CORS: the dashboard (another loopback port) may call; a foreign origin gets nothing.
+                r = urllib.request.urlopen(urllib.request.Request(base, headers={"Origin": "http://127.0.0.1:4321"}))
+                self.assertEqual(r.headers.get("Access-Control-Allow-Origin"), "http://127.0.0.1:4321")
+                r = urllib.request.urlopen(urllib.request.Request(base, headers={"Origin": "https://evil.example"}))
+                self.assertIsNone(r.headers.get("Access-Control-Allow-Origin"))
+                r = urllib.request.urlopen(urllib.request.Request(base, method="OPTIONS", headers={"Origin": "http://localhost:9"}))
+                self.assertEqual((r.status, r.headers.get("Access-Control-Allow-Methods")), (204, "GET, POST, OPTIONS"))
             finally:
                 p.stop()
 
