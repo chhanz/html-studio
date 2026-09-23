@@ -18,6 +18,13 @@ type Props = {
    * whose height depends on the chat pane below it.
    */
   fit?: 'width' | 'contain'
+  /**
+   * Let the page run scripts and receive the pointer (select-to-edit overlay).
+   * Off by default: thumbnails and the plain viewer are inert pictures.
+   */
+  interactive?: boolean
+  /** Receives the iframe element (to postMessage into it). */
+  frameRef?: (el: HTMLIFrameElement | null) => void
 }
 
 /**
@@ -25,7 +32,7 @@ type Props = {
  * whole frame with CSS transform so it fits the container. Layout never depends
  * on iframe content.
  */
-export function SlideFrame({ src, stageWidth, stageHeight, lazy = false, title, className = '', reloadKey = 0, fit = 'width' }: Props) {
+export function SlideFrame({ src, stageWidth, stageHeight, lazy = false, title, className = '', reloadKey = 0, fit = 'width', interactive = false, frameRef }: Props) {
   const boxRef = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ w: 0, h: 0 })
   const [visible, setVisible] = useState(!lazy)
@@ -65,12 +72,13 @@ export function SlideFrame({ src, stageWidth, stageHeight, lazy = false, title, 
 
   const frame = visible && scale > 0 && (
     <iframe
-      key={reloadKey}
+      key={`${reloadKey}:${interactive ? 'i' : 's'}`}
+      ref={frameRef}
       src={src}
       title={title}
-      sandbox="allow-same-origin"
+      sandbox={interactive ? 'allow-scripts allow-same-origin' : 'allow-same-origin'}
       tabIndex={-1}
-      className="absolute top-0 left-0 border-0 pointer-events-none"
+      className={`absolute top-0 left-0 border-0 ${interactive ? '' : 'pointer-events-none'}`}
       style={{ width: stageWidth, height: stageHeight, transform: `scale(${scale})`, transformOrigin: 'top left' }}
     />
   )

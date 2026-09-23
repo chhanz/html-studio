@@ -1,6 +1,6 @@
 {
   "name": "html-studio",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "displayName": "HTML Studio",
   "description": "View, edit, check and present HTML slide decks. Point at an element in the live preview, leave a comment, and let the agent apply the change.",
   "author": "Cheolhee Han",

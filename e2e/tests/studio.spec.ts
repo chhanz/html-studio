@@ -307,14 +307,18 @@ test('viewer fits its box at any chat size; the splitter resizes and persists', 
   await page.getByRole('button', { name: /Deck chat/ }).click() // open the (default-collapsed) chat pane
 
   const fits = async () => {
-    const box = await page.getByTestId('slide-fit').boundingBox()
-    const stage = await page.getByTestId('slide-stage').boundingBox()
-    expect(box && stage).toBeTruthy()
-    // Whole 16:9 stage inside the available box (no clipped footer), aspect kept.
-    expect(stage!.width).toBeLessThanOrEqual(box!.width + 1)
-    expect(stage!.height).toBeLessThanOrEqual(box!.height + 1)
-    expect(Math.abs(stage!.width / stage!.height - 16 / 9)).toBeLessThan(0.02)
-    return stage!
+    // The stage re-measures through a ResizeObserver, so poll until it has settled
+    // inside its box: whole 16:9 stage visible (no clipped footer), aspect kept.
+    let stage = (await page.getByTestId('slide-stage').boundingBox())!
+    await expect
+      .poll(async () => {
+        const box = (await page.getByTestId('slide-fit').boundingBox())!
+        stage = (await page.getByTestId('slide-stage').boundingBox())!
+        return stage.width <= box.width + 1 && stage.height <= box.height + 1
+      })
+      .toBe(true)
+    expect(Math.abs(stage.width / stage.height - 16 / 9)).toBeLessThan(0.02)
+    return stage
   }
   const before = await fits()
   const chatBefore = (await page.getByTestId('deck-chat').boundingBox())!.height
@@ -324,10 +328,10 @@ test('viewer fits its box at any chat size; the splitter resizes and persists', 
   const hb = (await handle.boundingBox())!
   await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2)
   await page.mouse.down()
-  await page.mouse.move(hb.x + hb.width / 2, hb.y - 120, { steps: 6 })
+  await page.waitForTimeout(50) // pointer capture + listeners attach in the down handler
+  await page.mouse.move(hb.x + hb.width / 2, hb.y - 120, { steps: 8 })
   await page.mouse.up()
-  const chatAfter = (await page.getByTestId('deck-chat').boundingBox())!.height
-  expect(chatAfter).toBeGreaterThan(chatBefore + 60)
+  await expect.poll(async () => (await page.getByTestId('deck-chat').boundingBox())!.height).toBeGreaterThan(chatBefore + 60)
   const after = await fits()
   expect(after.height).toBeLessThan(before.height)
   const ratio = Number(await handle.getAttribute('aria-valuenow'))
@@ -376,4 +380,68 @@ test('DESIGN.md: theme row shows the design, tokens.css is written on demand and
   const css = await (await page.request.get(`/apps/html-studio/api/design?path=${encodeURIComponent(`${home}/decks/acme-quarterly`)}`)).json()
   expect(css.tokensExists).toBe(true)
   expect(css.css).toBe('tokens.css')
+})
+
+test('select-to-edit: clicking an element pins it with file, selector and text; pins persist and re-anchor', async ({ page }) => {
+  await openApp(page)
+  await addFixtureRoot(page)
+  await selectDeck(page, 'acme-quarterly')
+  await page.locator('#slides-body li').nth(2).click() // 030_uptime.html (has an image)
+
+  const select = page.getByRole('button', { name: /^Select$/ })
+  await expect(select).toHaveAttribute('aria-pressed', 'false')
+  // Plain viewer: no overlay, no scripts.
+  const viewer = page.locator('[data-testid="slide-stage"] iframe')
+  expect(await viewer.getAttribute('sandbox')).toBe('allow-same-origin')
+  expect(await viewer.getAttribute('src')).not.toContain('hs=select')
+
+  await select.click()
+  await expect(select).toHaveAttribute('aria-pressed', 'true')
+  await expect(viewer).toHaveAttribute('src', /\/slide\/2\?hs=select$/)
+  expect(await viewer.getAttribute('sandbox')).toContain('allow-scripts')
+  const frame = page.frameLocator('[data-testid="slide-stage"] iframe')
+  await expect(frame.locator('.hs-pin-layer')).toHaveCount(1) // overlay booted
+
+  // Hover shows the highlight box with a label; click captures the element.
+  const img = frame.locator('img.fixture-img')
+  await img.hover()
+  await expect(frame.locator('.hs-sel-label')).toHaveText('img.fixture-img')
+  await img.click()
+  const pin = page.getByTestId('pin')
+  await expect(pin).toHaveCount(1)
+  await expect(pin).toContainText('030_uptime.html')
+  await expect(pin).toContainText('img.fixture-img')
+  await expect(pin).toHaveAttribute('data-how', 'selector')
+  await expect(frame.locator('.hs-pin')).toHaveText('1')
+  await expect(frame.locator('.hs-pin')).toHaveAttribute('data-how', 'selector')
+
+  // Comment goes in the focused input and is kept per deck (reload).
+  const input = page.getByRole('textbox', { name: /Comment for pin 1/ })
+  await input.fill('Make the chart wider')
+  await page.locator('#slides-body li').nth(0).click()
+  const h1 = frame.locator('.slide h1')
+  await h1.click()
+  await expect(page.getByTestId('pin')).toHaveCount(2)
+  await expect(page.getByTestId('pin').nth(1)).toContainText('010_cover.html')
+  await expect(page.getByTestId('pin').nth(1)).toContainText('"Acme Quarterly Review"')
+  await expect(frame.locator('.hs-pin')).toHaveText('2') // only this slide's marker is drawn
+
+  await page.reload()
+  await page.waitForFunction(() => (window as any).__hsReady === true)
+  await selectDeck(page, 'acme-quarterly')
+  await expect(page.getByTestId('pin')).toHaveCount(2)
+  await expect(page.getByRole('textbox', { name: /Comment for pin 1/ })).toHaveValue('Make the chart wider')
+
+  // Jump from the pin to its slide; markers come back once selection is on again.
+  await page.getByRole('button', { name: /Go to slide 3/ }).click()
+  await expect(page.getByText('3 / 4')).toBeVisible()
+  await page.getByRole('button', { name: /^Select$/ }).click()
+  await expect(page.frameLocator('[data-testid="slide-stage"] iframe').locator('.hs-pin')).toHaveText('1')
+
+  // Remove one pin; the other keeps its number.
+  await page.getByRole('button', { name: /^Remove pin$/ }).first().click()
+  await expect(page.getByTestId('pin')).toHaveCount(1)
+  await expect(page.getByTestId('pin')).toContainText('010_cover.html')
+  await page.getByRole('button', { name: /^Clear all$/ }).click()
+  await expect(page.getByTestId('pins-panel')).toHaveCount(0)
 })

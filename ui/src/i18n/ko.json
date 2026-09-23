@@ -108,5 +108,17 @@
   "theme.tokens.update": "tokens.css 갱신",
   "theme.tokens.hint": "DESIGN.md의 값을 CSS 변수로 덱 폴더에 씁니다. 미리보기에 바로 적용됩니다",
   "theme.tokens.own_css_hint": "이 덱은 {css}로 스타일을 정합니다. tokens.css는 그 스타일시트가 불러 쓰도록 옆에 생성됩니다",
-  "viewer.tokens_theme": "내장 테마 + tokens.css"
+  "viewer.tokens_theme": "내장 테마 + tokens.css",
+  "toolbar.select": "선택",
+  "select.hint": "미리보기에서 요소를 클릭해 핀 코멘트를 남깁니다",
+  "select.on_hint": "선택 모드: 요소를 클릭하면 핀이 추가됩니다. 끄려면 [선택]을 다시 누르세요.",
+  "pins.title": "핀 ({n})",
+  "pins.hint": "에이전트 전송은 다음 단계입니다. 코멘트는 덱별로 보관됩니다.",
+  "pins.clear": "모두 지우기",
+  "pins.jump": "{n}번 슬라이드로",
+  "pins.placeholder": "여기를 어떻게 바꿀까요?",
+  "pins.comment_for": "핀 {n} 코멘트",
+  "pins.remove": "핀 제거",
+  "pins.lost": "요소를 찾지 못함",
+  "pins.moved": "위치로 다시 찾음"
 }

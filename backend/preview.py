@@ -7,7 +7,7 @@ session cookie.
 
 Routes (all GET):
   /health                    liveness
-  /slide/<index>             one slide fragment wrapped into a full page
+  /slide/<index>             one slide fragment wrapped into a full page (?hs=select adds the overlay)
   /print                     every slide as one 1280x720 page (PDF export)
   /assets/<path>, /img/<path>, /out/<path>
                              static files from the deck folder (contained)
@@ -168,6 +168,21 @@ PRESENT_HELPER_JS = (
     "})();</script>"
 )
 _BODY_END_RE = re.compile(r"</body>", re.I)
+_INJECT_DIR = Path(__file__).resolve().parent / "inject"
+
+
+def select_helper_js() -> str:
+    """The select-to-edit overlay (inject/select.js), read on each call so a dev
+    edit is picked up without a restart; it is a few KB."""
+    return (_INJECT_DIR / "select.js").read_text(encoding="utf-8")
+
+
+def inject_select_helper(page: str) -> str:
+    """Return the slide page with the select-to-edit overlay appended."""
+    script = "<script>" + select_helper_js() + "</script>"
+    if _BODY_END_RE.search(page):
+        return _BODY_END_RE.sub(lambda _m: script + "</body>", page, count=1)
+    return page + script
 
 
 def inject_present_helper(page: str) -> str:
@@ -335,6 +350,8 @@ class DeckPreview:
             page = self.render_slide(idx)
             if page is None:
                 return _send(h, 404, b"no such slide", "text/plain")
+            if "select" in parse_qs(url.query).get("hs", []):
+                page = inject_select_helper(page)
             return _send(h, 200, page.encode("utf-8"), "text/html; charset=utf-8")
         target = self.resolve_static(path)
         if target is None:

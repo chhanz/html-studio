@@ -241,6 +241,23 @@ class PresentHelperTests(unittest.TestCase):
             finally:
                 p.stop()
 
+    def test_select_overlay_injected_only_with_select_query(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            deck = Path(tmp) / "deck"
+            (deck / "slides").mkdir(parents=True)
+            (deck / "slides" / "010.html").write_text("<section class='slide'><h1>x</h1></section>")
+            p = preview.DeckPreview(deck, "slides", None)
+            port = p.start()
+            try:
+                plain = urllib.request.urlopen(f"http://127.0.0.1:{port}/slide/0").read()
+                self.assertNotIn(b"hs-capture", plain)
+                page = urllib.request.urlopen(f"http://127.0.0.1:{port}/slide/0?hs=select").read()
+                self.assertIn(b"hs-capture", page)
+                self.assertIn(b"hs-pins", page)
+                self.assertTrue(page.endswith(b"</script></body></html>"), page[-40:])
+            finally:
+                p.stop()
+
     def test_helper_appended_without_body_tag(self) -> None:
         self.assertTrue(preview.inject_present_helper("<p>x</p>").endswith("</script>"))
 

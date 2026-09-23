@@ -108,5 +108,17 @@
   "theme.tokens.update": "Update tokens.css",
   "theme.tokens.hint": "Write CSS variables from DESIGN.md into the deck folder; the preview uses them right away",
   "theme.tokens.own_css_hint": "This deck styles itself with {css}; tokens.css is written next to it for that stylesheet to import",
-  "viewer.tokens_theme": "Built-in theme + tokens.css"
+  "viewer.tokens_theme": "Built-in theme + tokens.css",
+  "toolbar.select": "Select",
+  "select.hint": "Click an element in the preview to pin a comment on it",
+  "select.on_hint": "Selection on: click an element to add a pin. Click Select again to stop.",
+  "pins.title": "Pins ({n})",
+  "pins.hint": "Sending to the agent comes next; comments are kept per deck.",
+  "pins.clear": "Clear all",
+  "pins.jump": "Go to slide {n}",
+  "pins.placeholder": "What should change here?",
+  "pins.comment_for": "Comment for pin {n}",
+  "pins.remove": "Remove pin",
+  "pins.lost": "element not found",
+  "pins.moved": "re-anchored by position"
 }

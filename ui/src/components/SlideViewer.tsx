@@ -11,9 +11,12 @@ type Props = {
   current: number
   onChange: (index: number) => void
   reloadKey?: number
+  /** Select-to-edit: the frame runs the overlay and takes clicks. */
+  selectMode?: boolean
+  frameRef?: (el: HTMLIFrameElement | null) => void
 }
 
-export function SlideViewer({ t, preview, current, onChange, reloadKey }: Props) {
+export function SlideViewer({ t, preview, current, onChange, reloadKey, selectMode = false, frameRef }: Props) {
   const total = preview.slides.length
   const prev = () => onChange(Math.max(0, current - 1))
   const next = () => onChange(Math.min(total - 1, current + 1))
@@ -62,12 +65,14 @@ export function SlideViewer({ t, preview, current, onChange, reloadKey }: Props)
       </div>
       <div className="flex-1 min-h-0" style={{ minHeight: 120 }}>
         <SlideFrame
-          src={`${preview.baseUrl}/slide/${current}`}
+          src={`${preview.baseUrl}/slide/${current}${selectMode ? '?hs=select' : ''}`}
           stageWidth={preview.stage.width}
           stageHeight={preview.stage.height}
           title={preview.slides[current]}
           reloadKey={reloadKey}
           fit="contain"
+          interactive={selectMode}
+          frameRef={frameRef}
           className="rounded-md border border-border"
         />
       </div>

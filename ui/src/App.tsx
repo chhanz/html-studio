@@ -5,6 +5,7 @@ import { ApiError, type BackendStatus, type BuildInfo, type BuildResult, type De
 import { BuildPanel } from './components/BuildPanel'
 import { DeckChat } from './components/DeckChat'
 import { DeckPanel } from './components/DeckPanel'
+import { PinsPanel } from './components/PinsPanel'
 import { Presenter } from './components/Presenter'
 import { Section, useCollapsed } from './components/Section'
 import { SlideStrip } from './components/SlideStrip'
@@ -13,6 +14,7 @@ import { SmallBtn } from './components/SmallBtn'
 import { ThemeRow } from './components/ThemeRow'
 import { Spinner } from './components/Spinner'
 import { LOCALES, type LocalePref, useI18n } from './i18n'
+import { type Capture, type Pin, loadPins, newPin, savePins } from './pins'
 
 type Conn = 'connecting' | 'connected' | 'error'
 
@@ -147,6 +149,67 @@ export default function HtmlStudio() {
   // --- present / pdf
   const [pdf, setPdf] = useState<PdfJob | null>(null)
   const [pdfError, setPdfError] = useState<string | null>(null)
+
+  // P2-1: select-to-edit. The viewer frame runs the overlay (backend/inject/select.js)
+  // and reports clicks; pins live here (persisted per deck) and are pushed back
+  // to the frame so it can draw and re-anchor the markers.
+  const [selectMode, setSelectMode] = useState(false)
+  const [pins, setPins] = useState<Pin[]>([])
+  const [activePin, setActivePin] = useState<string | null>(null)
+  const viewerFrame = useRef<HTMLIFrameElement | null>(null)
+  const setViewerFrame = useCallback((el: HTMLIFrameElement | null) => {
+    viewerFrame.current = el
+  }, [])
+  useEffect(() => {
+    setSelectMode(false)
+    setActivePin(null)
+    setPins(selected ? loadPins(selected.path) : [])
+  }, [selected?.path]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (selected) savePins(selected.path, pins)
+  }, [pins, selected?.path]) // eslint-disable-line react-hooks/exhaustive-deps
+  const pushPins = useCallback(() => {
+    const w = viewerFrame.current?.contentWindow
+    if (!w) return
+    const forSlide = pins
+      .filter((p) => p.slideIndex === current)
+      .map((p) => ({ id: p.id, index: p.index, status: p.status, cid: p.cid, selector: p.selector, rect: p.rect, comment: p.comment }))
+    w.postMessage({ type: 'hs-pins', pins: forSlide }, '*')
+  }, [pins, current])
+  useEffect(() => {
+    if (selectMode) pushPins()
+  }, [pushPins, selectMode])
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      if (e.source !== viewerFrame.current?.contentWindow) return
+      const m = e.data as { type?: string } & Partial<Capture> & { pins?: { id: string; how: Pin['how'] }[] }
+      if (!m || typeof m.type !== 'string') return
+      if (m.type === 'hs-select-ready') {
+        pushPins()
+      } else if (m.type === 'hs-capture' && typeof m.selector === 'string' && preview) {
+        const cap = m as unknown as Capture
+        const slideFile = preview.slides[cap.slideIndex] ?? String(cap.slideIndex + 1)
+        setPins((prev) => {
+          const nextIndex = prev.reduce((max, p) => Math.max(max, p.index), 0) + 1
+          const pin = newPin(cap, slideFile, nextIndex)
+          setActivePin(pin.id)
+          return [...prev, pin]
+        })
+      } else if (m.type === 'hs-anchored' && Array.isArray(m.pins)) {
+        const how = new Map(m.pins.map((a) => [a.id, a.how]))
+        setPins((prev) => (prev.some((p) => how.has(p.id) && p.how !== how.get(p.id)) ? prev.map((p) => (how.has(p.id) ? { ...p, how: how.get(p.id) } : p)) : prev))
+      }
+    }
+    window.addEventListener('message', onMsg)
+    return () => window.removeEventListener('message', onMsg)
+  }, [preview, pushPins])
+  const updatePinComment = useCallback((id: string, comment: string) => setPins((prev) => prev.map((p) => (p.id === id ? { ...p, comment } : p))), [])
+  const removePin = useCallback((id: string) => setPins((prev) => prev.filter((p) => p.id !== id)), [])
+  const jumpToPin = useCallback((slideIndex: number, id: string) => {
+    setCurrent(slideIndex)
+    setActivePin(id)
+    setViewMode('slides')
+  }, [])
 
   // P1-8: DESIGN.md recognition. Read-only until the user asks for tokens.css.
   const [designInfo, setDesignInfo] = useState<DesignInfo | null>(null)
@@ -572,6 +635,15 @@ export default function HtmlStudio() {
                 {building && <Spinner />}
                 {t('toolbar.build')}
               </SmallBtn>
+              <SmallBtn
+                onClick={() => setSelectMode((v) => !v)}
+                active={selectMode}
+                aria-pressed={selectMode}
+                disabled={!preview || viewMode !== 'slides'}
+                title={t('select.hint')}
+              >
+                {t('toolbar.select')}
+              </SmallBtn>
               <SmallBtn disabled>{t('toolbar.check')}</SmallBtn>
               <SmallBtn onClick={present} disabled={!outputUrl} title={outputUrl ? t('present.hint') : t('present.need_output')}>
                 {t('toolbar.present')}
@@ -646,7 +718,24 @@ export default function HtmlStudio() {
                 </div>
               </div>
             ) : (
-              <SlideViewer t={t} preview={preview} current={current} onChange={setCurrent} reloadKey={reloadKey} />
+              <>
+                {selectMode && (
+                  <div className="mb-1 flex-none text-[12px]" style={{ color: 'var(--accent)' }} role="status">
+                    {t('select.on_hint')}
+                  </div>
+                )}
+                <SlideViewer t={t} preview={preview} current={current} onChange={setCurrent} reloadKey={reloadKey} selectMode={selectMode} frameRef={setViewerFrame} />
+                <PinsPanel
+                  t={t}
+                  pins={pins}
+                  current={current}
+                  activeId={activePin}
+                  onComment={updatePinComment}
+                  onRemove={removePin}
+                  onJump={jumpToPin}
+                  onClearAll={() => setPins([])}
+                />
+              </>
             )
           ) : (
             <div
