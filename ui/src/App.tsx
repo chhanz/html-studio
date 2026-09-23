@@ -83,6 +83,15 @@ export default function HtmlStudio() {
   const [building, setBuilding] = useState(false)
   const [buildResult, setBuildResult] = useState<BuildResult | null>(null)
   const [pendingCommand, setPendingCommand] = useState<string | null>(null)
+  // Decks whose undeclared build script the user chose not to adopt (kept across reloads).
+  const [scriptIgnored, setScriptIgnored] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('hs.scriptIgnored') || '[]') as string[]
+    } catch {
+      return []
+    }
+  })
+  useEffect(() => localStorage.setItem('hs.scriptIgnored', JSON.stringify(scriptIgnored)), [scriptIgnored])
   const [reloadKey, setReloadKey] = useState(0)
   const [viewMode, setViewMode] = useState<'slides' | 'output' | 'code'>('slides')
   // Code editor drafts (unsaved text per slide), kept across slide and view switches.
@@ -1199,6 +1208,27 @@ export default function HtmlStudio() {
               onFixAll={fixAllIssues}
               onClose={() => setCheckResult(null)}
             />
+          )}
+          {selected && buildInfo?.script && buildInfo.suggestedCommand && !buildInfo.command && !scriptIgnored.includes(selected.path) && (
+            <div className="mb-2 flex-none rounded-md border p-3 text-[13px] flex flex-wrap items-center gap-2" style={{ borderColor: 'var(--border)' }} role="status" data-testid="build-script-notice">
+              <span className="flex-1 min-w-0">{t('build.script.found', { script: buildInfo.script, command: buildInfo.suggestedCommand })}</span>
+              <SmallBtn
+                active
+                onClick={() => {
+                  const path = selected.path
+                  void client
+                    .buildAdopt(path)
+                    .then((info) => {
+                      setBuildInfo(info)
+                      return runBuild(false)
+                    })
+                    .catch(() => undefined)
+                }}
+              >
+                {t('build.script.use', { script: buildInfo.script })}
+              </SmallBtn>
+              <SmallBtn onClick={() => setScriptIgnored((v) => [...v, selected.path])}>{t('build.script.ignore')}</SmallBtn>
+            </div>
           )}
           {selected && (buildResult || pendingCommand) && (
             <div className="mb-2 flex-none overflow-y-auto" style={{ maxHeight: "40%" }}>

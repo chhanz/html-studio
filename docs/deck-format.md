@@ -54,6 +54,8 @@ Optional. Every key is optional.
 | `check.disable` | check rules to skip for this deck (see below) |
 | `title`, `presenter`, `purpose`, `audience` | deck metadata written by the new deck wizard; informational |
 
+If the deck root holds a `build.sh`, `rebuild.sh`, `make.sh` or `Makefile` that `studio.json` does not declare, the studio offers it; accepting writes the command into `studio.json`, and the usual one-time approval follows.
+
 Without `build`, a split deck is assembled by the built-in assembler: every fragment in order, wrapped in one document with the deck stylesheet and a small runtime for keyboard navigation and hash-based slide addressing (`#3`).
 
 ## `DESIGN.md` and `tokens.css`

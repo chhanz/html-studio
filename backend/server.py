@@ -50,7 +50,7 @@ BUILD_JOBS = check_lib.CheckJobs("build")  # external build commands run off the
 PREVIEWS = preview_lib.PreviewRegistry()
 
 APP_NAME = os.environ.get("KIROCREW_APP_NAME", "html-studio")
-APP_VERSION = "0.1.31"
+APP_VERSION = "0.1.32"
 PORT = int(os.environ.get("PORT", "9100"))
 HOME = Path(os.environ.get("KIROCREW_HOME", str(Path.home() / ".kiro" / "crew")))
 DATA_DIR = HOME / "apps" / APP_NAME / "data"
@@ -313,6 +313,25 @@ def route_build_info(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
         return 400, {"error": "deck_not_allowed"}
     deck_info = deck_lib.describe_deck(deck, deck)
     info = build_lib.build_contract(deck, deck_info.get("entry") if deck_info else None)
+    info["trusted"] = bool(info["command"]) and build_lib.is_trusted(DATA_DIR, deck, info["command"])
+    return 200, info
+
+
+def route_build_adopt(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
+    """POST /build/adopt {path}: write the deck's detected build script into studio.json
+    as its build command. Answers the refreshed build info; consent is still asked on build."""
+    deck = _deck_under_roots(str(body.get("path", "")))
+    if deck is None:
+        return 400, {"error": "deck_not_allowed"}
+    deck_info = deck_lib.describe_deck(deck, deck)
+    if deck_info is None:
+        return 404, {"error": "not_a_deck"}
+    try:
+        if build_lib.adopt_script(deck) is None:
+            return 404, {"error": "no_script"}
+    except OSError as exc:
+        return 500, {"error": "write_failed", "detail": str(exc)}
+    info = build_lib.build_contract(deck, deck_info.get("entry"))
     info["trusted"] = bool(info["command"]) and build_lib.is_trusted(DATA_DIR, deck, info["command"])
     return 200, info
 
@@ -930,6 +949,7 @@ ROUTES: dict[tuple[str, str], Route] = {
     ("POST", "/preview/stop"): route_preview_stop,
     ("POST", "/build/info"): route_build_info,
     ("POST", "/build"): route_build,
+    ("POST", "/build/adopt"): route_build_adopt,
     ("GET", "/build"): route_build_status,
     ("POST", "/present"): route_present,
     ("GET", "/notes"): route_notes_list,

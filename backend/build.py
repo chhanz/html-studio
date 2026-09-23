@@ -55,6 +55,7 @@ def build_contract(deck: Path, entry: str | None = None) -> dict[str, Any]:
     if not _inside(deck, output):
         output = entry or DEFAULT_OUTPUT
     builtin = command is None and entry is None
+    script = find_build_script(deck) if command is None else None
     return {
         "command": command,
         "output": output,
@@ -63,7 +64,43 @@ def build_contract(deck: Path, entry: str | None = None) -> dict[str, Any]:
         "buildable": command is not None or builtin,
         "singleFile": entry is not None,
         "commandHash": command_hash(command) if command else None,
+        # A build script the author left in the deck root but did not declare:
+        # offered in the UI, never run until adopted into studio.json and trusted.
+        "script": script,
+        "suggestedCommand": script_command(script) if script else None,
     }
+
+
+BUILD_SCRIPTS = ("build.sh", "rebuild.sh", "make.sh", "Makefile")
+
+
+def find_build_script(deck: Path) -> str | None:
+    """The first well-known build script present in the deck root, or None."""
+    for name in BUILD_SCRIPTS:
+        if (deck / name).is_file():
+            return name
+    return None
+
+
+def script_command(script: str) -> str:
+    return "make" if script == "Makefile" else f"sh ./{script}"
+
+
+def adopt_script(deck: Path) -> str | None:
+    """Declare the detected script as the deck's build command in studio.json.
+
+    Returns the command written, or None when there is nothing to adopt. The
+    command is not trusted by this: the usual consent step still follows.
+    """
+    script = find_build_script(deck)
+    if script is None:
+        return None
+    studio = deck_lib._read_studio(deck) or {}
+    if isinstance(studio.get("build"), str) and studio["build"].strip():
+        return studio["build"].strip()
+    studio["build"] = script_command(script)
+    (deck / "studio.json").write_text(json.dumps(studio, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return studio["build"]
 
 
 def _inside(deck: Path, rel: str) -> bool:

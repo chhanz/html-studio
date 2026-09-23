@@ -293,5 +293,8 @@
   "roots.manage": "관리",
   "roots.rescan": "다시 읽기",
   "roots.rescan_hint": "폴더를 지금 다시 읽습니다 (몇 초마다 자동으로도 읽습니다)",
-  "roots.hint": "slides/ 폴더나 studio.json이 있는 하위 폴더가 덱으로 나열됩니다."
+  "roots.hint": "slides/ 폴더나 studio.json이 있는 하위 폴더가 덱으로 나열됩니다.",
+  "build.script.found": "이 덱에 {script}가 있습니다. 내장 조립기 대신 이 스크립트({command})로 빌드할까요?",
+  "build.script.use": "{script} 사용",
+  "build.script.ignore": "내장 조립기 유지"
 }

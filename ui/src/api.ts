@@ -41,6 +41,9 @@ export type BuildInfo = {
   singleFile: boolean
   commandHash: string | null
   trusted: boolean
+  /** A build script found in the deck root but not declared in studio.json. */
+  script?: string | null
+  suggestedCommand?: string | null
 }
 export type BuildIssue = { file: string; message: string }
 export type BuildResult = {
@@ -118,6 +121,7 @@ export function makeClient(api: AppApi) {
     previewStart: (path: string) => wrap(api.post<PreviewInfo>(`${API}/preview/start`, { path })),
     previewStop: (path: string) => wrap(api.post<{ stopped: boolean }>(`${API}/preview/stop`, { path })),
     buildInfo: (path: string) => wrap(api.post<BuildInfo>(`${API}/build/info`, { path })),
+    buildAdopt: (path: string) => wrap(api.post<BuildInfo>(`${API}/build/adopt`, { path })),
     build: (path: string, trust = false) => wrap(api.post<BuildResult | BuildStart>(`${API}/build`, { path, trust })),
     buildStatus: (id: string) => wrap(api.get<BuildJob>(`${API}/build?id=${encodeURIComponent(id)}`)),
     present: (path: string, slide?: number, mode?: 'presenter', language?: string) =>

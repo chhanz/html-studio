@@ -116,7 +116,7 @@ class ServerTest(unittest.TestCase):
         code, data = self.request("GET", "/api/status", signed=True)
         self.assertEqual(code, 200)
         self.assertEqual(data["app"], "html-studio")
-        self.assertEqual(data["version"], "0.1.31")
+        self.assertEqual(data["version"], "0.1.32")
         self.assertTrue(data["dataDir"].startswith(self.tmp.name))
 
     def test_signed_unknown_route_is_404(self) -> None:
@@ -206,6 +206,17 @@ class ServerTest(unittest.TestCase):
             self.assertEqual((data["state"], data["result"]["ok"], data["result"]["mode"]), ("done", True, "external"), data)
             code, data = self.request("GET", "/api/build?id=nope", signed=True)
             self.assertEqual((code, data["error"]), (404, "unknown_job"))
+
+            # An undeclared build script is detected and can be adopted into studio.json.
+            (deck / "studio.json").unlink()
+            (deck / "rebuild.sh").write_text("mkdir -p out && echo y > out/index.html\n")
+            code, info = self.request("POST", "/api/build/info", signed=True, body=body)
+            self.assertEqual((code, info["builtin"], info["script"], info["suggestedCommand"]), (200, True, "rebuild.sh", "sh ./rebuild.sh"))
+            code, info = self.request("POST", "/api/build/adopt", signed=True, body=body)
+            self.assertEqual((code, info["command"], info["trusted"], info["script"]), (200, "sh ./rebuild.sh", False, None))
+            self.assertEqual(json.loads((deck / "studio.json").read_text())["build"], "sh ./rebuild.sh")
+            code, data = self.request("POST", "/api/build", signed=True, body=body)
+            self.assertEqual((data["needsTrust"], data["command"]), (True, "sh ./rebuild.sh"))
 
             # Reveal refuses paths outside the deck.
             code, data = self.request("POST", "/api/reveal", signed=True,

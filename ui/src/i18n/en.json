@@ -293,5 +293,8 @@
   "roots.manage": "Manage",
   "roots.rescan": "Rescan",
   "roots.rescan_hint": "Read the folders again now (they are rescanned every few seconds anyway)",
-  "roots.hint": "Every subfolder with a slides/ directory or a studio.json is listed as a deck."
+  "roots.hint": "Every subfolder with a slides/ directory or a studio.json is listed as a deck.",
+  "build.script.found": "This deck has {script}. Build with it ({command}) instead of the built-in assembler?",
+  "build.script.use": "Use {script}",
+  "build.script.ignore": "Keep built-in"
 }

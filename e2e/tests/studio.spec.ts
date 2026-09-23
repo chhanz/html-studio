@@ -155,21 +155,25 @@ test('builds a slides deck with the built-in assembler and shows the output', as
   await expect(page.getByText('4 / 4')).toBeVisible()
 })
 
-test('external build command: asks for trust once, runs as a job that outlives one request, rebuilds after a save', async ({ page }) => {
+test('external build: an undeclared rebuild.sh is offered, adopting it asks for trust once, the build runs as a job that outlives one request, and a save rebuilds', async ({ page }) => {
   await openApp(page)
   await addFixtureRoot(page)
   const home = await fakeHome(page)
-  // A build script that takes a while: the request must not wait for it.
-  const cmd = 'sleep 2 && mkdir -p out && cat slides/*.html > out/index.html'
-  await page.request.post('/__ctl/write', { data: { path: `${home}/decks/acme-quarterly/studio.json`, text: JSON.stringify({ build: cmd }) } })
+  // The author left a build script in the deck root (no studio.json). It takes a
+  // while on purpose: the request must not wait for it.
+  await page.request.post('/__ctl/write', { data: { path: `${home}/decks/acme-quarterly/rebuild.sh`, text: 'sleep 2\nmkdir -p out && cat slides/*.html > out/index.html\n' } })
   await selectDeck(page, 'acme-quarterly')
 
+  // The studio notices the script and offers it; nothing runs until adopted and trusted.
+  const notice = page.getByTestId('build-script-notice')
+  await expect(notice).toContainText('rebuild.sh')
+  await notice.getByRole('button', { name: 'Use rebuild.sh' }).click()
   const build = page.getByRole('button', { name: /^Build$/ })
-  await expect(build).toBeEnabled()
-  await build.click()
-  // Consent first: the dialog names the command.
+  // Consent first: the dialog names the command, and studio.json now declares it.
   const dialog = page.getByRole('dialog').filter({ hasText: /Run this deck's build command/ })
-  await expect(dialog).toContainText('sleep 2')
+  await expect(dialog).toContainText('sh ./rebuild.sh')
+  expect(JSON.parse(await (await page.request.get(`/__ctl/read?path=${encodeURIComponent(`${home}/decks/acme-quarterly/studio.json`)}`)).text()).build).toBe('sh ./rebuild.sh')
+  await expect(notice).toHaveCount(0)
   await dialog.getByRole('button', { name: /Trust and build/ }).click()
   // The job is running: the Build button shows busy, then the result lands.
   await expect(build).toBeDisabled()
