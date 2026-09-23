@@ -37,6 +37,7 @@ HTML decks are easy for an agent to write and hard for a person to steer: you en
 - **PDF**: every slide as a page, using the deck's own print styles.
 
 ![Presenter window](assets/docs/presenter.png)
+![Pen strokes from the presenter window, mirrored on the show](assets/docs/pen.png)
 
 ## Deck conventions
 
