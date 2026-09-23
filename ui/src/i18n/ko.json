@@ -190,5 +190,20 @@
   "present.presenter_on": "발표자 창 연결됨",
   "present.presenter_off": "발표자 창 없음",
   "present.presenter_window": "발표자 창",
-  "present.presenter_hint": "발표자 창(노트, 다음 슬라이드, 타이머, 펜)을 브라우저로 엽니다. 본인 화면으로 옮겨 두세요"
+  "present.presenter_hint": "발표자 창(노트, 다음 슬라이드, 타이머, 펜)을 브라우저로 엽니다. 본인 화면으로 옮겨 두세요",
+  "view.code": "코드",
+  "code.title": "{n}번 슬라이드 소스",
+  "code.loading": "불러오는 중",
+  "code.saving": "저장 중",
+  "code.saved": "저장됨",
+  "code.unsaved": "저장 안 된 변경",
+  "code.error": "저장 실패 ({code})",
+  "code.save": "저장",
+  "code.save_hint": "디스크에 저장 (Cmd/Ctrl+S). 빌드된 덱이면 다시 빌드합니다.",
+  "code.reload": "다시 불러오기",
+  "code.reload_hint": "파일을 디스크에서 다시 읽습니다 (저장 안 된 변경은 사라짐)",
+  "code.conflict": "파일을 연 뒤에 디스크 내용이 바뀌었습니다 (에이전트나 다른 편집기가 썼습니다).",
+  "code.conflict_reload": "디스크에서 다시 불러오기",
+  "code.conflict_overwrite": "내 변경으로 덮어쓰기",
+  "code.hint": "Cmd/Ctrl+S 저장. Tab 들여쓰기. 저장하면 미리보기와 스트립이 갱신되고, 빌드된 덱은 다시 빌드됩니다."
 }

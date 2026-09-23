@@ -747,3 +747,71 @@ test('present opens the presenter window in ANOTHER browser and stays in sync: s
   })).toBe('blank')
   await other.close()
 })
+
+test('code view edits a slide: highlighted source, Cmd+S saves, preview and built output refresh, conflicts are caught', async ({ page }) => {
+  await openApp(page)
+  await addFixtureRoot(page)
+  await selectDeck(page, 'acme-quarterly')
+  const home = await fakeHome(page)
+  const deckPath = `${home}/decks/acme-quarterly`
+  await page.getByRole('button', { name: /^Build$/ }).click()
+  await expect(page.getByRole('status').filter({ hasText: /Build succeeded/ })).toBeVisible()
+  // Go to slide 2 and open the code view.
+  await page.locator('#slides-body li').nth(1).click()
+  await page.getByRole('group', { name: /^View$/ }).getByRole('button', { name: /^Code$/ }).click()
+  const editor = page.getByTestId('code-editor')
+  await expect(editor).toContainText('Slide 2 source')
+  await expect(editor).toContainText('slides/020_agenda.html')
+  const ta = editor.getByRole('textbox')
+  await expect(ta).toHaveValue(/Agenda · 안건/)
+  // Highlight layer colours the tag names.
+  const tagSpan = editor.locator('pre span', { hasText: '<section' }).first()
+  await expect(tagSpan).toHaveCSS('color', /rgb/)
+  expect(await tagSpan.evaluate((el) => el.getAttribute('style'))).toContain('--accent')
+  await expect(editor.getByRole('button', { name: 'Save' })).toBeDisabled()
+
+  // Edit: replace the heading; the title shows the unsaved dot, Save enables.
+  const original = await ta.inputValue()
+  await ta.fill(original.replace('<h2>Agenda · 안건</h2>', '<h2>Plan for today</h2>'))
+  await expect(editor).toContainText('Unsaved changes')
+  await expect(editor.getByRole('button', { name: 'Save' })).toBeEnabled()
+  // Tab inserts two spaces instead of leaving the field.
+  await ta.focus()
+  await ta.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(0, 0))
+  await page.keyboard.press('Tab')
+  await expect(ta).toHaveValue(/^  <section/)
+  await ta.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(0, 0))
+  await page.keyboard.press('Shift+Tab')
+  await expect(ta).toHaveValue(/^<section/)
+
+  // Cmd+S saves: the viewer beside the editor shows the new heading, the file is written,
+  // and the built output was rebuilt with it.
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+s' : 'Control+s')
+  await expect(editor).toContainText('Saved')
+  await expect(page.getByTestId('code-view').frameLocator('iframe[title="020_agenda.html"]').locator('h2')).toHaveText('Plan for today')
+  const onDisk = await (await page.request.get(`/__ctl/read?path=${encodeURIComponent(deckPath + '/slides/020_agenda.html')}`)).text()
+  expect(onDisk).toContain('<h2>Plan for today</h2>')
+  const built = await (await page.request.get(`/__ctl/read?path=${encodeURIComponent(deckPath + '/out/index.html')}`)).text()
+  expect(built).toContain('Plan for today')
+
+  // A draft survives switching slides and coming back.
+  await ta.fill(original.replace('<h2>Agenda · 안건</h2>', '<h2>Draft heading</h2>'))
+  await expect(editor).toContainText('Unsaved changes')
+  await page.locator('#slides-body li').nth(2).click()
+  await expect(editor).toContainText('Slide 3 source')
+  await expect(ta).toHaveValue(/Uptime/)
+  await page.locator('#slides-body li').nth(1).click()
+  await expect(editor).toContainText('Slide 2 source')
+  await expect(ta).toHaveValue(/Draft heading/)
+  await expect(editor).toContainText('Unsaved changes')
+
+  // Meanwhile the agent writes the file: saving is refused, the bar offers reload or overwrite.
+  await page.request.post('/__ctl/write', { data: { path: deckPath + '/slides/020_agenda.html', text: original.replace('<h2>Agenda · 안건</h2>', '<h2>Agent wrote this</h2>') } })
+  await editor.getByRole('button', { name: 'Save' }).click()
+  const bar = editor.getByRole('alert')
+  await expect(bar).toContainText('changed on disk')
+  await bar.getByRole('button', { name: 'Reload from disk' }).click()
+  await expect(ta).toHaveValue(/Agent wrote this/)
+  await expect(editor.getByRole('button', { name: 'Save' })).toBeDisabled()
+  await expect(editor.getByRole('alert')).toHaveCount(0)
+})

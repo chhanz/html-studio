@@ -7,6 +7,7 @@ import { BuildPanel } from './components/BuildPanel'
 import { CheckPanel, issueKey } from './components/CheckPanel'
 import { DeckChat } from './components/DeckChat'
 import { NotesPanel } from './components/NotesPanel'
+import { CodeEditor, type Drafts } from './components/CodeEditor'
 import { DeckPanel } from './components/DeckPanel'
 import { PinsPanel } from './components/PinsPanel'
 import { Presenter } from './components/Presenter'
@@ -80,7 +81,9 @@ export default function HtmlStudio() {
   const [buildResult, setBuildResult] = useState<BuildResult | null>(null)
   const [pendingCommand, setPendingCommand] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
-  const [viewMode, setViewMode] = useState<'slides' | 'output'>('slides')
+  const [viewMode, setViewMode] = useState<'slides' | 'output' | 'code'>('slides')
+  // Code editor drafts (unsaved text per slide), kept across slide and view switches.
+  const draftsRef = useRef<Drafts>(new Map())
   // Output view: the frame follows `current` through its hash (src={url#N}); the
   // built-in runtime also reports its own navigation back, so the strip follows.
   const outputFrameRef = useRef<HTMLIFrameElement>(null)
@@ -812,9 +815,9 @@ export default function HtmlStudio() {
           <div className="flex items-center justify-between gap-2 mb-2 flex-wrap flex-none">
             <CardTitle>{selected ? selected.name : t('panel.preview')}</CardTitle>
             <div className="flex gap-1 flex-wrap items-center">
-              {outputUrl && (
+              {preview && (
                 <div className="inline-flex rounded-md border border-border overflow-hidden mr-2" role="group" aria-label={t('view.label')}>
-                  {(['slides', 'output'] as const).map((m) => (
+                  {(outputUrl ? (['slides', 'output', 'code'] as const) : (['slides', 'code'] as const)).map((m) => (
                     <button
                       key={m}
                       type="button"
@@ -935,7 +938,31 @@ export default function HtmlStudio() {
             </div>
           )}
           {selected && preview ? (
-            viewMode === 'output' && outputUrl ? (
+            viewMode === 'code' && preview.slides[current] ? (
+              <div className="flex gap-3 min-h-0 flex-1" data-testid="code-view">
+                <div className="min-w-0 min-h-0" style={{ flex: '1 1 55%' }}>
+                  <CodeEditor
+                    t={t}
+                    client={client}
+                    deckPath={selected.path}
+                    slide={preview.slides[current]}
+                    slideNumber={current + 1}
+                    drafts={draftsRef.current}
+                    refreshKey={reloadKey}
+                    onSaved={(res) => {
+                      setReloadKey((k) => k + 1)
+                      if (res.rebuild && 'ok' in res.rebuild) {
+                        setBuildResult(res.rebuild)
+                        void client.buildInfo(selected.path).then(setBuildInfo).catch(() => undefined)
+                      }
+                    }}
+                  />
+                </div>
+                <div className="min-w-0 min-h-0 flex flex-col" style={{ flex: '1 1 45%' }}>
+                  <SlideViewer t={t} preview={preview} current={current} onChange={setCurrent} reloadKey={reloadKey} />
+                </div>
+              </div>
+            ) : viewMode === 'output' && outputUrl ? (
               <div className="flex flex-col gap-2 min-h-0">
                 <div className="text-[12px] text-muted">{t('view.output_hint')}</div>
                 <div

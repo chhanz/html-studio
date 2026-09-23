@@ -35,6 +35,7 @@ import build as build_lib  # noqa: E402
 import design as design_lib  # noqa: E402
 import pinqueue as queue_lib  # noqa: E402
 import check as check_lib  # noqa: E402
+import source as source_lib  # noqa: E402
 import notes as notes_lib  # noqa: E402
 import export as export_lib  # noqa: E402
 
@@ -44,7 +45,7 @@ CHECK_JOBS = check_lib.CheckJobs()
 PREVIEWS = preview_lib.PreviewRegistry()
 
 APP_NAME = os.environ.get("KIROCREW_APP_NAME", "html-studio")
-APP_VERSION = "0.1.22"
+APP_VERSION = "0.1.23"
 PORT = int(os.environ.get("PORT", "9100"))
 HOME = Path(os.environ.get("KIROCREW_HOME", str(Path.home() / ".kiro" / "crew")))
 DATA_DIR = HOME / "apps" / APP_NAME / "data"
@@ -422,6 +423,65 @@ def route_note_put(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
     return 200, {"slide": slide, "file": f"{notes_lib.NOTES_DIR}/{notes_lib.note_name(slide)}", "exists": bool(text.strip())}
 
 
+# --- slide source (code editor) ----------------------------------------------
+def route_source_get(h: "Handler", _body: dict[str, Any]) -> tuple[int, Any]:
+    """GET /source?path=<deck>&slide=<name>: one slide's HTML, with the file mtime."""
+    q = parse_qs(urlsplit(h.path).query)
+    deck = _deck_under_roots(q.get("path", [""])[0])
+    if deck is None:
+        return 400, {"error": "deck_not_allowed"}
+    info = deck_lib.describe_deck(deck, deck)
+    if info is None:
+        return 404, {"error": "not_a_deck"}
+    try:
+        return 200, source_lib.read_source(deck, info["slidesDir"], info.get("entry"), q.get("slide", [""])[0])
+    except source_lib.SourceError as exc:
+        return 404, {"error": exc.code}
+    except OSError as exc:
+        return 500, {"error": "read_failed", "detail": str(exc)}
+
+
+def route_source_put(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
+    """POST /source {path, slide, text, mtime?}: write the slide's HTML.
+
+    ``mtime`` is the value the editor loaded; a different file on disk answers
+    409 with the current mtime (omit ``mtime`` to overwrite). When the deck's
+    built output exists, the deck is rebuilt too, so the output view stays in
+    step; an external build command that still needs consent is not run
+    (``rebuild.skipped``).
+    """
+    deck = _deck_under_roots(str(body.get("path", "")))
+    if deck is None:
+        return 400, {"error": "deck_not_allowed"}
+    text = body.get("text")
+    if not isinstance(text, str):
+        return 400, {"error": "bad_text"}
+    mtime = body.get("mtime")
+    if mtime is not None and not isinstance(mtime, (int, float)):
+        return 400, {"error": "bad_mtime"}
+    info = deck_lib.describe_deck(deck, deck)
+    if info is None:
+        return 404, {"error": "not_a_deck"}
+    try:
+        result = source_lib.write_source(deck, info["slidesDir"], info.get("entry"), str(body.get("slide", "")), text, mtime)
+    except source_lib.Conflict as exc:
+        return 409, {"error": "conflict", "mtime": exc.mtime}
+    except source_lib.SourceError as exc:
+        return 400 if exc.code in ("too_large", "not_one_section") else 404, {"error": exc.code}
+    except OSError as exc:
+        return 500, {"error": "write_failed", "detail": str(exc)}
+    contract = build_lib.build_contract(deck, info.get("entry"))
+    if contract["outputExists"]:
+        if contract["command"] and not build_lib.is_trusted(DATA_DIR, deck, contract["command"]):
+            result["rebuild"] = {"skipped": "needs_trust"}
+        else:
+            try:
+                result["rebuild"] = build_lib.build(DATA_DIR, deck, info["slidesDir"], entry=info.get("entry"), css_rel=_deck_css(deck))
+            except build_lib.BuildError as exc:
+                result["rebuild"] = {"skipped": exc.code}
+    return 200, result
+
+
 # --- deck check -------------------------------------------------------------
 def route_check_start(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
     """POST /check {path}: run every rule over the deck (async; poll GET /check?id)."""
@@ -642,6 +702,8 @@ ROUTES: dict[tuple[str, str], Route] = {
     ("GET", "/notes"): route_notes_list,
     ("GET", "/note"): route_note_get,
     ("POST", "/note"): route_note_put,
+    ("GET", "/source"): route_source_get,
+    ("POST", "/source"): route_source_put,
     ("POST", "/check"): route_check_start,
     ("GET", "/check"): route_check_status,
     ("POST", "/pins/send"): route_pins_send,

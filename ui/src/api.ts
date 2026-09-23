@@ -118,6 +118,9 @@ export function makeClient(api: AppApi) {
     reveal: (path: string, file: string) => wrap(api.post<{ revealed: string }>(`${API}/reveal`, { path, file })),
     notesIndex: (path: string) => wrap(api.get<NotesIndex>(`${API}/notes?path=${encodeURIComponent(path)}`)),
     noteGet: (path: string, slide: string) => wrap(api.get<Note>(`${API}/note?path=${encodeURIComponent(path)}&slide=${encodeURIComponent(slide)}`)),
+    sourceGet: (path: string, slide: string) => wrap(api.get<SlideSource>(`${API}/source?path=${encodeURIComponent(path)}&slide=${encodeURIComponent(slide)}`)),
+    sourceSave: (path: string, slide: string, text: string, mtime: number | null) =>
+      wrap(api.post<SourceSaved>(`${API}/source`, mtime === null ? { path, slide, text } : { path, slide, text, mtime })),
     noteSave: (path: string, slide: string, text: string) => wrap(api.post<{ slide: string; file: string; exists: boolean }>(`${API}/note`, { path, slide, text })),
     checkStart: (path: string) => wrap(api.post<CheckJob>(`${API}/check`, { path })),
     checkStatus: (id: string) => wrap(api.get<CheckJob>(`${API}/check?id=${encodeURIComponent(id)}`)),
@@ -183,4 +186,6 @@ export type CheckResult = { issues: CheckIssue[]; counts: Record<string, number>
 export type CheckJob = { id: string; state: 'running' | 'done' | 'error'; result?: CheckResult; error?: string; detail?: string }
 
 export type NotesIndex = { withNotes: string[]; orphans: string[]; dir: string }
+export type SlideSource = { slide: string; file: string; kind: 'file' | 'section'; text: string; mtime: number }
+export type SourceSaved = { slide: string; file: string; mtime: number; rebuild?: BuildResult | { skipped: string } }
 export type Note = { slide: string; file: string; text: string }

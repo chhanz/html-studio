@@ -190,5 +190,20 @@
   "present.presenter_on": "Presenter window connected",
   "present.presenter_off": "No presenter window",
   "present.presenter_window": "Presenter window",
-  "present.presenter_hint": "Open the presenter window (notes, next slide, timer, pen) in your browser; drag it to your own screen"
+  "present.presenter_hint": "Open the presenter window (notes, next slide, timer, pen) in your browser; drag it to your own screen",
+  "view.code": "Code",
+  "code.title": "Slide {n} source",
+  "code.loading": "Loading",
+  "code.saving": "Saving",
+  "code.saved": "Saved",
+  "code.unsaved": "Unsaved changes",
+  "code.error": "Could not save ({code})",
+  "code.save": "Save",
+  "code.save_hint": "Save to disk (Cmd/Ctrl+S). Rebuilds the deck when it has been built.",
+  "code.reload": "Reload",
+  "code.reload_hint": "Load the file from disk again (drops unsaved changes)",
+  "code.conflict": "This file changed on disk since you opened it (the agent or another editor wrote it).",
+  "code.conflict_reload": "Reload from disk",
+  "code.conflict_overwrite": "Overwrite with mine",
+  "code.hint": "Cmd/Ctrl+S saves. Tab indents. The preview and the strip refresh after a save; a built deck is rebuilt."
 }

@@ -12,7 +12,7 @@
 import { createServer } from 'node:http'
 import { spawn, spawnSync } from 'node:child_process'
 import { createHash, createHmac, randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, cpSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync, cpSync, rmSync } from 'node:fs'
 import { dirname, extname, join, normalize, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import net from 'node:net'
@@ -199,6 +199,17 @@ const server = createServer(async (req, res) => {
       const r = spawnSync('python3', [join(repo, 'backend', 'report.py'), '--batch', q.get('batch'), '--cid', q.get('cid'), '--status', q.get('status'), '--text', q.get('text') || ''], { encoding: 'utf-8' })
       res.writeHead(r.status === 0 ? 200 : 500, { 'Content-Type': 'text/plain' })
       return res.end(r.status === 0 ? r.stdout : r.stderr)
+    }
+    if (p === '/__ctl/read' || p === '/__ctl/write') {
+      // Tests read/write deck files directly ("the agent edited the file"); fake HOME only.
+      const target = p === '/__ctl/read' ? url.searchParams.get('path') : JSON.parse(body.toString('utf-8') || '{}').path
+      if (!target || !resolve(target).startsWith(fakeHome + '/')) {
+        res.writeHead(400)
+        return res.end('outside fake home')
+      }
+      if (p === '/__ctl/write') writeFileSync(target, JSON.parse(body.toString('utf-8')).text)
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' })
+      return res.end(p === '/__ctl/read' ? readFileSync(target, 'utf-8') : 'written')
     }
     if (p === '/__ctl/chat') {
       res.writeHead(200, { 'Content-Type': 'application/json' })

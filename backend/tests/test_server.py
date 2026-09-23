@@ -107,7 +107,7 @@ class ServerTest(unittest.TestCase):
         code, data = self.request("GET", "/api/status", signed=True)
         self.assertEqual(code, 200)
         self.assertEqual(data["app"], "html-studio")
-        self.assertEqual(data["version"], "0.1.22")
+        self.assertEqual(data["version"], "0.1.23")
         self.assertTrue(data["dataDir"].startswith(self.tmp.name))
 
     def test_signed_unknown_route_is_404(self) -> None:
@@ -275,6 +275,37 @@ class ServerTest(unittest.TestCase):
             code, data = self.request("POST", "/api/pins/send", signed=True, body=json.dumps({"path": str(deck), "pins": []}).encode())
             self.assertEqual((code, data["error"]), (400, "no_pins"))
             self.request("POST", "/api/roots/remove", signed=True, body=json.dumps({"path": root}).encode())
+
+    def test_source_routes_rebuild_and_conflict(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.home()) as root:
+            deck = Path(root) / "deck"
+            (deck / "slides").mkdir(parents=True)
+            (deck / "slides" / "010.html").write_text("<section class='slide'><h1>One</h1></section>")
+            (deck / "slides" / "020.html").write_text("<section class='slide'><h1>Two</h1></section>")
+            self.request("POST", "/api/roots/add", signed=True, body=json.dumps({"path": root}).encode())
+            q = "path=" + urllib.parse.quote(str(deck))
+            code, src = self.request("GET", f"/api/source?{q}&slide=020.html", signed=True)
+            self.assertEqual((code, src["kind"], src["file"], src["text"]), (200, "file", "slides/020.html", "<section class='slide'><h1>Two</h1></section>"))
+            # Not built yet: a save writes the file and does not build.
+            body = {"path": str(deck), "slide": "020.html", "text": "<section class='slide'><h1>Deux</h1></section>", "mtime": src["mtime"]}
+            code, data = self.request("POST", "/api/source", signed=True, body=json.dumps(body).encode())
+            self.assertEqual(code, 200)
+            self.assertNotIn("rebuild", data)
+            self.assertEqual((deck / "slides" / "020.html").read_text(), "<section class='slide'><h1>Deux</h1></section>")
+            # Stale mtime: conflict, nothing written.
+            code, data = self.request("POST", "/api/source", signed=True, body=json.dumps({**body, "text": "<section class='slide'>late</section>"}).encode())
+            self.assertEqual((code, data["error"]), (409, "conflict"))
+            self.assertEqual((deck / "slides" / "020.html").read_text(), "<section class='slide'><h1>Deux</h1></section>")
+            # Build the deck, then a save rebuilds it (built-in build needs no consent).
+            code, built = self.request("POST", "/api/build", signed=True, body=json.dumps({"path": str(deck)}).encode())
+            self.assertEqual((code, built["ok"]), (200, True))
+            out = deck / built["output"]
+            self.assertIn("Deux", out.read_text())
+            code, data = self.request("POST", "/api/source", signed=True, body=json.dumps({**body, "text": "<section class='slide'><h1>Drei</h1></section>", "mtime": None}).encode())
+            self.assertEqual((code, data["rebuild"]["ok"]), (200, True))
+            self.assertIn("Drei", out.read_text())
+            code, data = self.request("POST", "/api/source", signed=True, body=json.dumps({"path": str(deck), "slide": "zzz.html", "text": "x"}).encode())
+            self.assertEqual((code, data["error"]), (404, "unknown_slide"))
 
     def test_notes_round_trip_and_orphans(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.home()) as root:
