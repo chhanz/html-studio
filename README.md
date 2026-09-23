@@ -63,7 +63,7 @@ kirocrew app install /path/to/html-studio
 kirocrew app enable html-studio
 ```
 
-Then open **HTML Studio** in the dashboard sidebar, add a folder that contains decks, and pick one. The backend is a Python 3.9 or newer, standard library only started by the dashboard; a Chromium-based browser is needed for Check and PDF (found automatically).
+Then open **HTML Studio** in the dashboard sidebar, add a folder that contains decks, and pick one. The backend is a standard-library Python server (3.9 or newer) started by the dashboard; a Chromium-based browser is needed for Check and PDF (found automatically).
 
 ## Development
 
