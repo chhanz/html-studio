@@ -28,6 +28,8 @@ export type PreviewInfo = {
   slides: string[]
   css: string | null
   stage: { width: number; height: number }
+  /** Newest mtime among the slide files and the deck folder (changes when files are added, removed or edited). */
+  modifiedAt?: number
 }
 
 export type BuildInfo = {

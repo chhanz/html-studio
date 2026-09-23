@@ -996,3 +996,21 @@ test('new deck wizard creates a themed deck, selects it, asks the agent for an o
   await dialog.getByRole('button', { name: 'Create deck' }).click()
   await expect(dialog.getByRole('alert')).toContainText('already exists')
 })
+
+test('slides written outside the studio (the agent) appear in the strip and the viewer refreshes', async ({ page }) => {
+  await openApp(page)
+  await addFixtureRoot(page)
+  await selectDeck(page, 'acme-quarterly')
+  const home = await fakeHome(page)
+  const deckPath = `${home}/decks/acme-quarterly`
+  const items = page.locator('#slides-body ol > li')
+  await expect(items).toHaveCount(4)
+  await expect(page.frameLocator('[data-testid="slide-stage"] iframe').locator('h1')).toContainText('Acme Quarterly Review')
+  // The agent adds a slide and rewrites the cover heading.
+  await page.request.post('/__ctl/write', { data: { path: deckPath + '/slides/025_extra.html', text: '<section class="slide"><h2>Written by the agent</h2></section>' } })
+  await page.request.post('/__ctl/write', { data: { path: deckPath + '/slides/010_cover.html', text: '<section class="slide cover"><h1>Cover rewritten</h1></section>' } })
+  await expect(items).toHaveCount(5, { timeout: 10000 })
+  await expect(items.nth(2)).toContainText('025_extra.html')
+  await expect(page.frameLocator('[data-testid="slide-stage"] iframe').locator('h1')).toHaveText('Cover rewritten', { timeout: 10000 })
+  await expect(page.getByRole('button', { name: /^▸?\s*(Slides|슬라이드)/ }).first()).toContainText('(5)')
+})

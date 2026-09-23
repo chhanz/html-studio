@@ -415,6 +415,38 @@ export default function HtmlStudio() {
     [api, selected, preview, current, locale, buildInfo, t, setChatOpen],
   )
 
+  // Watch the selected deck for changes made outside the studio (the agent
+  // writing slides, an editor saving): preview/start is idempotent and reports
+  // the slide list and the newest mtime, so a light poll keeps the strip and
+  // the viewer in step without a file watcher.
+  const syncDeck = useCallback(async () => {
+    if (!selected || !preview) return
+    try {
+      const p = await client.previewStart(selected.path)
+      const slidesChanged = p.slides.length !== preview.slides.length || p.slides.some((s, i) => s !== preview.slides[i])
+      const touched = p.modifiedAt !== undefined && preview.modifiedAt !== undefined && p.modifiedAt > preview.modifiedAt
+      if (slidesChanged || touched || p.css !== preview.css) {
+        setPreview(p)
+        setReloadKey((k) => k + 1)
+        setNotesIndex(null)
+        setNotesRefresh((k) => k + 1)
+        if (slidesChanged) {
+          setDecks((ds) => ds.map((d) => (d.id === selected.id ? { ...d, slideCount: p.slides.length, slides: p.slides } : d)))
+          setCurrent((c) => Math.min(c, Math.max(0, p.slides.length - 1)))
+        }
+      }
+    } catch {
+      /* preview restarting or backend away: the next tick tries again */
+    }
+  }, [client, selected, preview])
+  useEffect(() => {
+    if (!selected || !preview) return
+    const id = setInterval(() => {
+      if (document.visibilityState === 'visible') void syncDeck()
+    }, 2500)
+    return () => clearInterval(id)
+  }, [selected, preview, syncDeck])
+
   // P3-5: speaker notes (notes/<slide>.md), edited under the preview.
   const [notesOpen, setNotesOpen] = useCollapsed('notes', false)
   const [notesIndex, setNotesIndex] = useState<NotesIndex | null>(null)
@@ -913,7 +945,10 @@ export default function HtmlStudio() {
                   onSelect={selectDeck}
                   onAddRoot={addRoot}
                   onRemoveRoot={removeRoot}
-                  onRefresh={refresh}
+                  onRefresh={async () => {
+                    await refresh()
+                    await syncDeck()
+                  }}
                   onNew={() => setNewDeckOpen(true)}
                 />
               </Section>
