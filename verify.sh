@@ -7,6 +7,11 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+echo "== version consistency"
+py_v=$(sed -nE 's/^APP_VERSION = "([^"]+)"/\1/p' backend/server.py)
+app_v=$(python3 -c 'import json;print(json.load(open("app.json"))["version"])')
+[ "$py_v" = "$app_v" ] || { echo "app.json version ($app_v) differs from backend APP_VERSION ($py_v)"; exit 1; }
+
 echo "== backend tests"
 python3 -W error::ResourceWarning -m unittest backend/tests/test_*.py
 

@@ -9,7 +9,7 @@ HTML decks are easy for an agent to write and hard for a person to steer: you en
 ## What it does
 
 **See**
-- Finds decks under the folders you register: a folder with `slides/` (one HTML section per file, ordered by file name) or a single `index.html` with `<section class="slide">` blocks.
+- Finds decks under the folders you register (and keeps looking: a deck created elsewhere shows up on its own): a folder with `slides/` (one HTML section per file, ordered by file name) or a single `index.html` with `<section class="slide">` blocks.
 - Live preview of every slide on a 1280x720 stage, thumbnails in a strip, the built output when there is one.
 - Keeps up with the folder: slides the agent adds or edits appear within a few seconds.
 
@@ -32,7 +32,8 @@ HTML decks are easy for an agent to write and hard for a person to steer: you en
 
 **Check and present**
 - **Check**: renders every slide headless and reports overflow, clipped or overlapping content, broken images, low contrast, forbidden punctuation, external resources, inline font sizes and a missing cover. Each issue can become a pin.
-- **Present**: a fullscreen show inside the app plus a presenter window in your browser (current and next slide, speaker notes, timer, pen that draws on the show, blackout). The two stay in sync through the local preview server.
+- **Present**: a fullscreen show inside the app plus a presenter window in your browser (current and next slide, speaker notes, timer, pen that draws on the show, blackout). The two stay in sync through the local preview server. The show is assembled live from the slide files, so it always matches what you see in the viewer and needs no build.
+- **Build**: assembles the slides into one `out/index.html` for sharing, or runs the deck's own build command after you approve it once (a `build.sh` or `rebuild.sh` found in the deck is offered). A deck built by its own command presents that output, and the studio says when the output is older than the slides.
 - **PDF**: every slide as a page, using the deck's own print styles.
 
 ![Presenter window](assets/docs/presenter.png)
@@ -63,7 +64,7 @@ kirocrew app install /path/to/html-studio
 kirocrew app enable html-studio
 ```
 
-Then open **HTML Studio** in the dashboard sidebar, add a folder that contains decks, and pick one. The backend is a standard-library Python server (3.9 or newer) started by the dashboard; a Chromium-based browser is needed for Check and PDF (found automatically).
+Then open **HTML Studio** in the dashboard sidebar, register a folder that contains decks (new decks are created inside a registered folder too), and pick one. The backend is a standard-library Python server (3.9 or newer) started by the dashboard; a Chromium-based browser is needed for Check and PDF (found automatically).
 
 ## Development
 
