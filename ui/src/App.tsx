@@ -9,6 +9,7 @@ import { DeckChat } from './components/DeckChat'
 import { DeckPanel } from './components/DeckPanel'
 import { PinsPanel } from './components/PinsPanel'
 import { Presenter } from './components/Presenter'
+import { QuickChips } from './components/QuickChips'
 import { Section, useCollapsed } from './components/Section'
 import { SlideStrip } from './components/SlideStrip'
 import { SlideViewer } from './components/SlideViewer'
@@ -17,6 +18,7 @@ import { ThemeRow } from './components/ThemeRow'
 import { Spinner } from './components/Spinner'
 import { LOCALES, type LocalePref, useI18n } from './i18n'
 import { type Capture, type Pin, loadPins, newPin, savePins } from './pins'
+import { type QuickActionId, quickActionPrompt } from './quick'
 
 type Conn = 'connecting' | 'connected' | 'error'
 
@@ -378,6 +380,34 @@ export default function HtmlStudio() {
     for (const i of checkResult.issues) if (!pinnedIssues.has(issueKey(i))) fixIssue(i)
   }, [checkResult, pinnedIssues, fixIssue])
 
+  // The deck's chat lives in the pane under the preview (DeckChat); collapsed until wanted.
+  const [chatOpen, setChatOpen] = useCollapsed('chat', false)
+
+  // P2-6: quick actions about the current slide, sent to the deck chat.
+  const runQuickAction = useCallback(
+    async (id: QuickActionId) => {
+      if (!selected || !preview) return
+      const name = preview.slides[current] ?? String(current + 1)
+      const slideFile = selected.kind === 'single' ? selected.entry ?? name : `${selected.slidesDir}/${name}`
+      const notesFile = `notes/${name.replace(/\.html?$/i, '').replace(/#/g, '-')}.md`
+      const prompt = quickActionPrompt(id, {
+        slideFile,
+        slideNumber: current + 1,
+        slideCount: preview.slides.length,
+        notesFile,
+        language: locale,
+        hasDesignMd: selected.hasDesignMd,
+      })
+      const { key } = await openDeckChat(api, { deck: selected, preview, build: buildInfo, language: locale }, t('chat.title', { name: selected.name }))
+      await api.post('/api/chat?ws=1', { message: prompt, slot: key, agent: '' })
+      setChatRefresh((k) => k + 1)
+      setChatOpen(true)
+      // Actions that edit files: refresh the preview after a moment so the change shows.
+      if (id === 'tighten' || id === 'draft-next' || id === 'notes') setTimeout(() => setReloadKey((k) => k + 1), 8000)
+    },
+    [api, selected, preview, current, locale, buildInfo, t, setChatOpen],
+  )
+
   // P1-8: DESIGN.md recognition. Read-only until the user asks for tokens.css.
   const [designInfo, setDesignInfo] = useState<DesignInfo | null>(null)
   const [tokensBusy, setTokensBusy] = useState(false)
@@ -415,8 +445,7 @@ export default function HtmlStudio() {
     }
   }, [client, selected])
 
-  // P1-7: the deck's chat lives in the pane under the preview (DeckChat).
-  const [chatOpen, setChatOpen] = useCollapsed('chat', false) // collapsed until wanted; the header says what it is
+  // P1-7: deck chat pane state is declared above (needed by the quick actions).
   // Preview / chat split: share of the right column given to the chat (persisted).
   const [chatRatio, setChatRatio] = useState<number>(() => {
     try {
@@ -982,7 +1011,17 @@ export default function HtmlStudio() {
         {/* Deck chat (under the preview) */}
         <div className="hs-right-chat min-h-0 flex flex-col" style={{ flex: chatOpen ? `0 0 ${Math.round(chatRatio * 1000) / 10}%` : '0 0 auto' }}>
         <Card>
-          <DeckChat t={t} locale={locale} deck={selected} preview={preview} build={buildInfo} open={chatOpen} onToggle={() => setChatOpen(!chatOpen)} refreshKey={chatRefresh} />
+          <DeckChat
+            t={t}
+            locale={locale}
+            deck={selected}
+            preview={preview}
+            build={buildInfo}
+            open={chatOpen}
+            onToggle={() => setChatOpen(!chatOpen)}
+            refreshKey={chatRefresh}
+            toolbar={preview ? <QuickChips t={t} slideNumber={current + 1} onRun={runQuickAction} /> : null}
+          />
         </Card>
         </div>
         </div>

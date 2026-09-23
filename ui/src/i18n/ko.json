@@ -160,5 +160,18 @@
   "check.fixcomment.external-resource": "이 리소스를 웹에서 불러오지 말고 덱 안(assets/ 또는 img/)에 포함해줘",
   "check.fixcomment.inline-font-size": "이 font-size를 스타일시트나 덱 클래스로 옮겨줘",
   "check.rule.punctuation": "대시 또는 중앙 점 사용",
-  "check.fixcomment.punctuation": "엠 대시와 중앙 점 없이 다시 써줘. 일반 문장부호나 세로줄(|)을 써줘"
+  "check.fixcomment.punctuation": "엠 대시와 중앙 점 없이 다시 써줘. 일반 문장부호나 세로줄(|)을 써줘",
+  "quick.label": "{n}번 슬라이드 빠른 작업",
+  "quick.summarize": "요약",
+  "quick.draft-next": "다음 슬라이드 초안",
+  "quick.notes": "노트 써줘",
+  "quick.check": "리뷰",
+  "quick.tighten": "간결하게",
+  "quick.sent": "덱 채팅으로 보냈습니다",
+  "quick.failed": "보내지 못했습니다",
+  "quick.hint.summarize": "이 슬라이드 내용 요약 세 줄 (파일 수정 없음)",
+  "quick.hint.draft-next": "이 슬라이드 맥락으로 다음 슬라이드 파일 생성",
+  "quick.hint.notes": "발표자 노트를 notes/<슬라이드>.md에 작성",
+  "quick.hint.check": "이 슬라이드의 표현과 레이아웃 리뷰 (수정 없음)",
+  "quick.hint.tighten": "뜻은 그대로, 문장을 짧게. 슬라이드 파일 수정"
 }

@@ -160,5 +160,18 @@
   "check.fixcomment.external-resource": "Bundle this resource into the deck (assets/ or img/) instead of loading it from the web",
   "check.fixcomment.inline-font-size": "Move this font-size into the stylesheet or use a deck class",
   "check.rule.punctuation": "Dash or middle dot in text",
-  "check.fixcomment.punctuation": "Rewrite without em/en dashes and middle dots; use plain punctuation or a pipe"
+  "check.fixcomment.punctuation": "Rewrite without em/en dashes and middle dots; use plain punctuation or a pipe",
+  "quick.label": "Quick actions for slide {n}",
+  "quick.summarize": "Summarize",
+  "quick.draft-next": "Draft next slide",
+  "quick.notes": "Write notes",
+  "quick.check": "Review",
+  "quick.tighten": "Tighten text",
+  "quick.sent": "Sent to the deck chat",
+  "quick.failed": "Could not send",
+  "quick.hint.summarize": "Three bullets on what this slide says (no edits)",
+  "quick.hint.draft-next": "Create the following slide from this one's context",
+  "quick.hint.notes": "Speaker notes into notes/<slide>.md",
+  "quick.hint.check": "Wording and layout review of this slide (no edits)",
+  "quick.hint.tighten": "Shorter text, same meaning, edits the slide"
 }

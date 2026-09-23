@@ -1,5 +1,5 @@
 import { ChatEmbed, useAppApi, useNavigate } from '@kirocrew/app-sdk'
-import { useCallback, useEffect, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useState } from 'react'
 import type { BuildInfo, Deck, PreviewInfo } from '../api'
 import { findDeckChat, openDeckChat } from '../chat'
 import { SmallBtn } from './SmallBtn'
@@ -17,6 +17,8 @@ type Props = {
   onToggle: () => void
   /** Bump to look the session up again (e.g. after pins created it). */
   refreshKey?: number
+  /** Rendered above the conversation (quick action chips). */
+  toolbar?: ReactNode
 }
 
 type Status = 'idle' | 'checking' | 'none' | 'ready' | 'error'
@@ -27,7 +29,7 @@ type Status = 'idle' | 'checking' | 'none' | 'ready' | 'error'
  * user starts a session explicitly, which creates it, scopes it to the deck
  * folder and sends the one-time brief (see chat.ts).
  */
-export function DeckChat({ t, locale, deck, preview, build, open, onToggle, refreshKey = 0 }: Props) {
+export function DeckChat({ t, locale, deck, preview, build, open, onToggle, refreshKey = 0, toolbar }: Props) {
   const api = useAppApi()
   const navigate = useNavigate()
   const [status, setStatus] = useState<Status>('idle')
@@ -106,6 +108,7 @@ export function DeckChat({ t, locale, deck, preview, build, open, onToggle, refr
       </div>
       {open && (
         <div id="deck-chat-body" className="hs-fill min-h-0 flex flex-col mt-1">
+          {deck && toolbar}
           {!deck && <p className="text-sm text-muted">{t('panel.chat.empty')}</p>}
           {deck && status === 'none' && (
             <div className="flex flex-col items-start gap-2">

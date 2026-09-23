@@ -555,3 +555,45 @@ test('deck check: finds the known issues, Fix turns an issue into a pin, Pin all
   const sendBtn = page.getByTestId('pins-send')
   await expect(sendBtn).toBeEnabled() // every generated pin already has a comment
 })
+
+test('quick action chips send a prompt about the current slide to the deck chat', async ({ page }) => {
+  await openApp(page)
+  await addFixtureRoot(page)
+  await selectDeck(page, 'acme-quarterly')
+  const home = await fakeHome(page)
+  await page.getByRole('button', { name: /Deck chat/ }).click()
+  const chips = page.getByTestId('quick-chips')
+  await expect(chips).toContainText('Quick actions for slide 1')
+  await page.locator('#slides-body li').nth(2).click()
+  await expect(chips).toContainText('Quick actions for slide 3')
+
+  // No session yet: the chip creates it (brief first), then sends the prompt.
+  await chips.getByRole('button', { name: /^Summarize$/ }).click()
+  await expect(chips.getByRole('status')).toHaveText('Sent to the deck chat')
+  let chat = await (await page.request.get('/__ctl/chat')).json()
+  expect(chat.slots).toHaveLength(1)
+  expect(chat.slots[0].project).toBe(`${home}/decks/acme-quarterly`)
+  let sends = chat.log.filter((l: any) => l.path.startsWith('/api/chat?'))
+  expect(sends).toHaveLength(2) // brief + summarize
+  expect(sends[1].body.message).toContain('Summarize slide 3 of 4 (slides/030_uptime.html) in English')
+  expect(sends[1].body.message).toContain('Do not edit any file')
+  await expect(page.getByTestId('deck-chat')).toHaveAttribute('data-status', 'ready')
+
+  // Second chip reuses the session; the notes prompt names the sidecar file.
+  await chips.getByRole('button', { name: /^Write notes$/ }).click()
+  await expect(chips.getByRole('status')).toHaveText('Sent to the deck chat')
+  chat = await (await page.request.get('/__ctl/chat')).json()
+  expect(chat.slots).toHaveLength(1)
+  sends = chat.log.filter((l: any) => l.path.startsWith('/api/chat?'))
+  expect(sends).toHaveLength(3)
+  expect(sends[2].body.message).toContain('notes/030_uptime.md')
+  expect(sends[2].body.message).toContain('Do not touch the slide HTML')
+
+  // Tighten mentions the design system when the deck has a DESIGN.md.
+  await chips.getByRole('button', { name: /^Tighten text$/ }).click()
+  await expect(chips.getByRole('status')).toHaveText('Sent to the deck chat')
+  chat = await (await page.request.get('/__ctl/chat')).json()
+  const last = chat.log.filter((l: any) => l.path.startsWith('/api/chat?')).at(-1)
+  expect(last.body.message).toContain('Follow DESIGN.md / tokens.css')
+  expect(last.body.message).toContain('No em/en dashes or middle dots')
+})
