@@ -14,7 +14,7 @@ import preview  # noqa: E402
 BROWSER = export.find_browser()
 
 SLIDE_A = (
-    '<section class="slide"><p class="eyebrow">SECTION 01</p><h1>Hello \u2014 world</h1>'
+    '<section class="slide"><p class="eyebrow">SECTION 01 \u00b7 ACME</p><h1>Hello \u2014 world</h1>'
     '<p style="font-size:9px;color:#bbb">faint text</p>'
     '<div style="position:absolute;left:1200px;top:600px;width:200px;height:200px"><p>outside</p></div>'
     '<div style="position:absolute;left:100px;top:300px;width:300px;height:40px;overflow:hidden"><p>' + "long text " * 80 + "</p></div>"
@@ -38,13 +38,13 @@ class StaticTests(unittest.TestCase):
         issues = [
             {"rule": "contrast", "slideIndex": 1, "detail": "x"},
             {"rule": "overflow", "slideIndex": 1, "detail": "y"},
-            {"rule": "em-dash", "slideIndex": 0, "detail": "z"},
+            {"rule": "punctuation", "slideIndex": 0, "detail": "z"},
             {"rule": "bogus", "slideIndex": 0, "detail": "?"},
         ]
         r = check.finish(issues, ["a.html", "b.html"], {"contrast"})
         self.assertEqual([(i["slideIndex"], i["rule"], i["severity"], i["slideFile"]) for i in r["issues"]],
-                         [(0, "em-dash", "warning", "a.html"), (1, "overflow", "error", "b.html")])
-        self.assertEqual(r["counts"], {"em-dash": 1, "overflow": 1})
+                         [(0, "punctuation", "warning", "a.html"), (1, "overflow", "error", "b.html")])
+        self.assertEqual(r["counts"], {"punctuation": 1, "overflow": 1})
         self.assertNotIn("contrast", r["rules"])
         self.assertEqual(r["disabled"], ["contrast"])
 
@@ -67,11 +67,11 @@ class RenderedTests(unittest.TestCase):
         by_rule: dict[str, list[dict]] = {}
         for i in r["issues"]:
             by_rule.setdefault(i["rule"], []).append(i)
-        self.assertEqual(sorted(by_rule), ["broken-image", "clipped", "contrast", "em-dash", "external-resource", "eyebrow", "inline-font-size", "overflow", "overlap"])
+        self.assertEqual(sorted(by_rule), ["broken-image", "clipped", "contrast", "external-resource", "inline-font-size", "overflow", "overlap", "punctuation"])
         # everything is on slide 0; the clean slide (b/wrap inline runs) reports nothing
         self.assertTrue(all(i["slideIndex"] == 0 for i in r["issues"]))
-        self.assertEqual(by_rule["eyebrow"][0]["text"], "SECTION 01")
-        self.assertEqual(by_rule["em-dash"][0]["tag"], "h1")
+        # the label line itself is fine; its middle dot and the heading's em dash are not
+        self.assertEqual(sorted((i["tag"], i["detail"]) for i in by_rule["punctuation"]), [("h1", "contains em dash"), ("p", "contains middle dot")])
         self.assertEqual({i["src"] for i in by_rule["broken-image"]}, {"img/missing.png", "https://example.invalid/x.png"})
         self.assertIn("https://example.invalid/x.png", by_rule["external-resource"][0]["detail"])
         self.assertEqual(by_rule["clipped"][0]["tag"], "div")

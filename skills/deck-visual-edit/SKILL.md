@@ -48,10 +48,8 @@ Locate the element with `selector` inside the slide's `<section>`; confirm with
 - Do not rename, reorder or delete slide files as part of a comment unless the
   comment asks for exactly that.
 - Speaker notes belong in `notes/<slide>.md`, never inside slide HTML.
-- Do not use em dashes or en dashes in slide text you write; use plain punctuation.
-- Do not add "eyebrow" lines: small uppercase label text above a heading such as
-  `ACME | INTRO | 2026` or `SECTION 01`. If a slide needs context, put it in the
-  heading or the body. When asked to remove one, fold any real meaning into the heading.
+- Do not use em dashes, en dashes, middle dots or bullet characters (—, –, ·, •)
+  in slide text you write. Use plain punctuation, or a pipe (|) as a separator.
 
 ## Report after EACH comment
 

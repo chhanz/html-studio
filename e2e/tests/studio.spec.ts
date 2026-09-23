@@ -526,8 +526,10 @@ test('deck check: finds the known issues, Fix turns an issue into a pin, Pin all
     return out
   }
   const c = await counts()
-  expect(Object.keys(c).sort()).toEqual(['broken-image', 'em-dash', 'eyebrow', 'missing-cover', 'overlap'])
-  await expect(panel).toContainText('ACME | INTRO | 2026')
+  expect(Object.keys(c).sort()).toEqual(['broken-image', 'missing-cover', 'overlap', 'punctuation'])
+  expect(c['punctuation']).toMatch(/2$/) // the label's middle dots and the heading's em dash
+  await expect(panel).toContainText('contains middle dot')
+  await expect(panel).toContainText('contains em dash')
   await expect(panel).toContainText('img/nope.png')
   // every issue sits on slide 1; the clean slide reports nothing
   const issues = panel.getByTestId('check-issue')
@@ -536,15 +538,14 @@ test('deck check: finds the known issues, Fix turns an issue into a pin, Pin all
   await expect(panel.getByRole('button', { name: /^2\. 020_clean\.html$/ })).toHaveCount(0)
 
   // Fix one issue: it becomes a pin with a prefilled comment and is marked handled.
-  const eyebrow = panel.locator('[data-testid="check-issue"][data-rule="eyebrow"]').first()
-  await eyebrow.getByRole('button', { name: /^Fix$/ }).click()
-  await expect(eyebrow).toHaveAttribute('data-pinned', 'true')
+  const punct = panel.locator('[data-testid="check-issue"][data-rule="punctuation"]').first()
+  await punct.getByRole('button', { name: /^Fix$/ }).click()
+  await expect(punct).toHaveAttribute('data-pinned', 'true')
   const pin = page.getByTestId('pin').first()
   await expect(pin).toContainText('slides/010_intro.html')
-  await expect(pin).toContainText('p.eyebrow')
-  await expect(page.getByRole('textbox', { name: /Comment for pin 1/ })).toHaveValue(/Remove this eyebrow label/)
+  await expect(page.getByRole('textbox', { name: /Comment for pin 1/ })).toHaveValue(/Rewrite without em\/en dashes and middle dots/)
   // Fixing the same issue again is a no-op.
-  await expect(eyebrow.getByRole('button')).toBeDisabled()
+  await expect(punct.getByRole('button')).toBeDisabled()
 
   // Pin all: the remaining issues become pins; the check panel shows them all handled.
   await panel.getByRole('button', { name: /^Pin all/ }).click()

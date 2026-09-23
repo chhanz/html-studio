@@ -133,7 +133,7 @@
   "pins.reply_placeholder": "에이전트의 질문에 답하기",
   "pins.dismiss_done": "완료된 핀 정리",
   "pins.send_failed": "핀을 보내지 못했습니다",
-  "check.hint": "모든 슬라이드 점검: 넘침, 잘림, 겹침, 이미지 유실, 대비, 표현",
+  "check.hint": "모든 슬라이드 점검: 넘침, 잘림, 겹침, 이미지 유실, 대비, 문장부호",
   "check.running": "{n}장 점검 중",
   "check.title": "점검: {n}건",
   "check.clean": "점검: {n}장 모두 이상 없음",
@@ -148,8 +148,6 @@
   "check.rule.broken-image": "이미지 유실",
   "check.rule.missing-cover": "첫 슬라이드가 커버가 아님",
   "check.rule.contrast": "대비 부족",
-  "check.rule.em-dash": "엠 대시 사용",
-  "check.rule.eyebrow": "제목 위 아이브로 라벨",
   "check.rule.external-resource": "외부 리소스",
   "check.rule.inline-font-size": "인라인 font-size",
   "check.rule.check-error": "슬라이드를 측정하지 못함",
@@ -159,8 +157,8 @@
   "check.fixcomment.broken-image": "유실된 이미지를 고치거나 바꿔줘",
   "check.fixcomment.missing-cover": "첫 슬라이드를 커버 슬라이드로 만들어줘",
   "check.fixcomment.contrast": "글자와 배경 대비를 요구 비율 이상으로 올려줘",
-  "check.fixcomment.em-dash": "엠 대시 없이 다시 써줘",
-  "check.fixcomment.eyebrow": "이 아이브로 라벨을 없애줘. 의미가 있으면 제목에 합쳐줘",
   "check.fixcomment.external-resource": "이 리소스를 웹에서 불러오지 말고 덱 안(assets/ 또는 img/)에 포함해줘",
-  "check.fixcomment.inline-font-size": "이 font-size를 스타일시트나 덱 클래스로 옮겨줘"
+  "check.fixcomment.inline-font-size": "이 font-size를 스타일시트나 덱 클래스로 옮겨줘",
+  "check.rule.punctuation": "대시 또는 중앙 점 사용",
+  "check.fixcomment.punctuation": "엠 대시와 중앙 점 없이 다시 써줘. 일반 문장부호나 세로줄(|)을 써줘"
 }

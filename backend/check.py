@@ -32,8 +32,7 @@ RULES: dict[str, str] = {
     "broken-image": "error",
     "missing-cover": "warning",
     "contrast": "warning",
-    "em-dash": "warning",
-    "eyebrow": "warning",
+    "punctuation": "warning",
     "external-resource": "warning",
     "inline-font-size": "info",
 }

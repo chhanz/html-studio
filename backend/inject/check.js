@@ -10,8 +10,7 @@
 //   overlap           two content elements (text / image) intersect
 //   broken-image      <img> did not load
 //   contrast          text colour vs background below WCAG AA
-//   em-dash           em or en dash in text
-//   eyebrow           small label line above a heading (kicker / overline)
+//   punctuation       em/en dash, middle dot or bullet character in text
 //   inline-font-size  font-size set in a style attribute
 //   external-resource src/href/url() that points at http(s)://
 (function () {
@@ -84,7 +83,6 @@
     var y = Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y))
     return x * y
   }
-  function isHeading(el) { return /^H[1-6]$/.test(el.tagName) }
 
   function measure(index, doc, win) {
     var stage = doc.querySelector('.hs-stage') || doc.body
@@ -181,27 +179,12 @@
       if (!hasOwnText(el)) return
       var own = ''
       for (var n = el.firstChild; n; n = n.nextSibling) if (n.nodeType === 3) own += n.nodeValue
-      if (/[\u2013\u2014]/.test(own)) push('em-dash', el, 'contains an em or en dash')
-    })
-
-    // eyebrow: a short label line right above a heading, or classed as one
-    Array.prototype.forEach.call(slide.querySelectorAll('*'), function (el) {
-      if (!hasOwnText(el) || isHeading(el)) return
-      var cls = classes(el).join(' ').toLowerCase()
-      var byClass = /(^|[\s-_])(eyebrow|kicker|overline|pretitle|supertitle)([\s-_]|$)/.test(cls)
-      var next = el.nextElementSibling
-      var beforeHeading = !!(next && isHeading(next))
-      var text = snippet(el)
-      var letters = text.replace(/[^A-Za-z]/g, '')
-      var upper = letters.length >= 4 && letters === letters.toUpperCase()
-      var separated = /\s[|\u00b7\u2022]\s/.test(text)
-      var cs = win.getComputedStyle(el)
-      var small = (parseFloat(cs.fontSize) || 16) <= 14
-      var tracked = parseFloat(cs.letterSpacing) > 0
-      var shortLine = text.length > 0 && text.length <= 48
-      if (byClass || (beforeHeading && shortLine && (upper || separated || (small && tracked)))) {
-        push('eyebrow', el, 'label line above a heading: "' + text + '"')
-      }
+      var found = []
+      if (/[\u2014]/.test(own)) found.push('em dash')
+      if (/[\u2013]/.test(own)) found.push('en dash')
+      if (/[\u00b7\u2027\u30fb]/.test(own)) found.push('middle dot')
+      if (/[\u2022]/.test(own)) found.push('bullet character')
+      if (found.length) push('punctuation', el, 'contains ' + found.join(', '))
     })
 
     // inline font-size

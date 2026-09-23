@@ -106,7 +106,7 @@ class ServerTest(unittest.TestCase):
         code, data = self.request("GET", "/api/status", signed=True)
         self.assertEqual(code, 200)
         self.assertEqual(data["app"], "html-studio")
-        self.assertEqual(data["version"], "0.1.15")
+        self.assertEqual(data["version"], "0.1.16")
         self.assertTrue(data["dataDir"].startswith(self.tmp.name))
 
     def test_signed_unknown_route_is_404(self) -> None:
@@ -282,8 +282,8 @@ class ServerTest(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=Path.home()) as root:
             deck = Path(root) / "deck"
             (deck / "slides").mkdir(parents=True)
-            (deck / "slides" / "010.html").write_text("<section class='slide'><p class='eyebrow'>SECTION 01</p><h1>Hello \u2014 world</h1></section>")
-            (deck / "studio.json").write_text(json.dumps({"check": {"disable": ["eyebrow"]}}))
+            (deck / "slides" / "010.html").write_text("<section class='slide'><p style='font-size:9px'>SECTION 01</p><h1>Hello \u2014 world</h1></section>")
+            (deck / "studio.json").write_text(json.dumps({"check": {"disable": ["inline-font-size"]}}))
             self.request("POST", "/api/roots/add", signed=True, body=json.dumps({"path": root}).encode())
             code, data = self.request("POST", "/api/check", signed=True, body=json.dumps({"path": str(deck)}).encode())
             self.assertEqual((code, data["state"]), (200, "running"))
@@ -295,13 +295,13 @@ class ServerTest(unittest.TestCase):
             self.assertEqual(st["state"], "done", st)
             res = st["result"]
             rules = [i["rule"] for i in res["issues"]]
-            self.assertIn("em-dash", rules)
+            self.assertIn("punctuation", rules)
             self.assertIn("missing-cover", rules)
-            self.assertNotIn("eyebrow", rules)  # disabled via studio.json
-            self.assertEqual(res["disabled"], ["eyebrow"])
+            self.assertNotIn("inline-font-size", rules)  # disabled via studio.json
+            self.assertEqual(res["disabled"], ["inline-font-size"])
             self.assertEqual(res["slides"], 1)
             self.assertTrue(all(i["slideFile"] == "010.html" for i in res["issues"]))
-            self.assertEqual(res["counts"]["em-dash"], 1)
+            self.assertEqual(res["counts"]["punctuation"], 1)
             code, st = self.request("GET", "/api/check?id=nope", signed=True)
             self.assertEqual((code, st["error"]), (404, "unknown_job"))
             self.request("POST", "/api/preview/stop", signed=True, body=json.dumps({"path": str(deck)}).encode())

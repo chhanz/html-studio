@@ -133,7 +133,7 @@
   "pins.reply_placeholder": "Answer the agent's question",
   "pins.dismiss_done": "Dismiss finished",
   "pins.send_failed": "Could not send the pins",
-  "check.hint": "Check every slide: overflow, clipping, overlap, broken images, contrast, wording",
+  "check.hint": "Check every slide: overflow, clipping, overlap, broken images, contrast, punctuation",
   "check.running": "Checking {n} slides",
   "check.title": "Check: {n} issues",
   "check.clean": "Check: no issues in {n} slides",
@@ -148,8 +148,6 @@
   "check.rule.broken-image": "Image missing",
   "check.rule.missing-cover": "First slide is not a cover",
   "check.rule.contrast": "Low contrast",
-  "check.rule.em-dash": "Em dash in text",
-  "check.rule.eyebrow": "Eyebrow label above heading",
   "check.rule.external-resource": "External resource",
   "check.rule.inline-font-size": "Inline font-size",
   "check.rule.check-error": "Could not measure slide",
@@ -159,8 +157,8 @@
   "check.fixcomment.broken-image": "Fix or replace this missing image",
   "check.fixcomment.missing-cover": "Make the first slide a cover slide",
   "check.fixcomment.contrast": "Increase the text/background contrast to at least the required ratio",
-  "check.fixcomment.em-dash": "Rewrite without the em dash",
-  "check.fixcomment.eyebrow": "Remove this eyebrow label; fold it into the heading if it carries meaning",
   "check.fixcomment.external-resource": "Bundle this resource into the deck (assets/ or img/) instead of loading it from the web",
-  "check.fixcomment.inline-font-size": "Move this font-size into the stylesheet or use a deck class"
+  "check.fixcomment.inline-font-size": "Move this font-size into the stylesheet or use a deck class",
+  "check.rule.punctuation": "Dash or middle dot in text",
+  "check.fixcomment.punctuation": "Rewrite without em/en dashes and middle dots; use plain punctuation or a pipe"
 }
