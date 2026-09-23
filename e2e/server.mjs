@@ -58,6 +58,7 @@ async function startBackend() {
       KIROCREW_HOME: crewHome,
       KIROCREW_PROXY_SECRET: SECRET,
       HTML_STUDIO_NO_PICKER: '1',
+      HTML_STUDIO_NO_OPEN: '1',
     },
     stdio: ['ignore', 'inherit', 'inherit'],
   })

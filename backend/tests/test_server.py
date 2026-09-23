@@ -57,6 +57,7 @@ class ServerTest(unittest.TestCase):
             "KIROCREW_HOME": cls.tmp.name,
             "KIROCREW_APP_NAME": "html-studio",
             "HTML_STUDIO_NO_PICKER": "1",
+            "HTML_STUDIO_NO_OPEN": "1",
         }
         cls.proc = subprocess.Popen([sys.executable, str(SERVER)], env=env,
                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -106,7 +107,7 @@ class ServerTest(unittest.TestCase):
         code, data = self.request("GET", "/api/status", signed=True)
         self.assertEqual(code, 200)
         self.assertEqual(data["app"], "html-studio")
-        self.assertEqual(data["version"], "0.1.17")
+        self.assertEqual(data["version"], "0.1.18")
         self.assertTrue(data["dataDir"].startswith(self.tmp.name))
 
     def test_signed_unknown_route_is_404(self) -> None:

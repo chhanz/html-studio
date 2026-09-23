@@ -185,5 +185,21 @@
   "notes.save_failed": "Save failed",
   "notes.orphans": "{n} note(s) without a slide",
   "notes.show": "Show",
-  "strip.has_notes": "Has notes"
+  "strip.has_notes": "Has notes",
+  "toolbar.presenter": "Presenter view",
+  "presenter.hint": "Speaker screen: current and next slide, notes, timer; opens the audience window in the browser",
+  "presenter.title": "Presenter view",
+  "presenter.current": "Slide {n} of {total}",
+  "presenter.next": "Next: slide {n}",
+  "presenter.last": "Last slide",
+  "presenter.notes": "Notes",
+  "presenter.no_notes": "No notes for this slide.",
+  "presenter.laser_on": "laser",
+  "presenter.audience_connected": "Audience window connected",
+  "presenter.audience_none": "No audience window",
+  "presenter.open_audience": "Audience window",
+  "presenter.open_audience_hint": "Open the built deck in the system browser; move it to the projector and press F for fullscreen",
+  "presenter.black": "Black",
+  "presenter.black_hint": "Blank the audience screen (B)",
+  "presenter.keys": "Arrows: navigate. Move the mouse over the slide to point. B: black screen. Esc: close."
 }

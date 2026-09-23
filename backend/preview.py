@@ -197,6 +197,21 @@ def check_document(count: int, stage: tuple[int, int] = (STAGE_W, STAGE_H)) -> s
     )
 
 
+def _inject_script(page: str, js: str) -> str:
+    script = "<script>" + js + "</script>"
+    if _BODY_END_RE.search(page):
+        return _BODY_END_RE.sub(lambda _m: script + "</body>", page, count=1)
+    return page + script
+
+
+def inject_audience_bridge(page: str) -> str:
+    """Return the built deck with the audience-window bridge (inject/audience.js) appended."""
+    script = "<script>" + (_INJECT_DIR / "audience.js").read_text(encoding="utf-8") + "</script>"
+    if _BODY_END_RE.search(page):
+        return _BODY_END_RE.sub(lambda _m: script + "</body>", page, count=1)
+    return page + script
+
+
 def inject_present_helper(page: str) -> str:
     """Return the page with the presenter helper appended to its body."""
     if _BODY_END_RE.search(page):
@@ -371,16 +386,23 @@ class DeckPreview:
             page = self.render_slide(idx)
             if page is None:
                 return _send(h, 404, b"no such slide", "text/plain")
-            if "select" in parse_qs(url.query).get("hs", []):
+            modes = parse_qs(url.query).get("hs", [])
+            if "select" in modes:
                 page = inject_select_helper(page)
+            elif "relay" in modes:
+                page = _inject_script(page, (_INJECT_DIR / "relay.js").read_text(encoding="utf-8"))
             return _send(h, 200, page.encode("utf-8"), "text/html; charset=utf-8")
         target = self.resolve_static(path)
         if target is None:
             return _send(h, 404, b"not found", "text/plain")
         ctype = _TEXT_TYPES.get(target.suffix.lower()) or mimetypes.guess_type(str(target))[0] or "application/octet-stream"
         data = target.read_bytes()
-        if ctype.startswith("text/html") and "present" in parse_qs(url.query).get("hs", []):
-            data = inject_present_helper(data.decode("utf-8", errors="replace")).encode("utf-8")
+        if ctype.startswith("text/html"):
+            modes = parse_qs(url.query).get("hs", [])
+            if "present" in modes:
+                data = inject_present_helper(data.decode("utf-8", errors="replace")).encode("utf-8")
+            elif "audience" in modes:
+                data = inject_audience_bridge(data.decode("utf-8", errors="replace")).encode("utf-8")
         return _send(h, 200, data, ctype)
 
 

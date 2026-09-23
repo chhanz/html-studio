@@ -258,6 +258,36 @@ class PresentHelperTests(unittest.TestCase):
             finally:
                 p.stop()
 
+    def test_relay_injected_on_slide_with_relay_query(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            deck = Path(tmp) / "deck"
+            (deck / "slides").mkdir(parents=True)
+            (deck / "slides" / "010.html").write_text("<section class='slide'>x</section>")
+            p = preview.DeckPreview(deck, "slides", None)
+            port = p.start()
+            try:
+                page = urllib.request.urlopen(f"http://127.0.0.1:{port}/slide/0?hs=relay").read()
+                self.assertIn(b"hs-relay-ready", page)
+                self.assertNotIn(b"hs-capture", page)
+            finally:
+                p.stop()
+
+    def test_audience_bridge_injected_with_audience_query(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            deck = Path(tmp) / "deck"
+            (deck / "slides").mkdir(parents=True)
+            (deck / "slides" / "010.html").write_text("<section class='slide'>x</section>")
+            (deck / "out").mkdir()
+            (deck / "out" / "index.html").write_text("<html><body><p>deck</p></body></html>")
+            p = preview.DeckPreview(deck, "slides", None, extra_files=("out/index.html",))
+            port = p.start()
+            try:
+                body = urllib.request.urlopen(f"http://127.0.0.1:{port}/out/index.html?hs=audience").read()
+                self.assertIn(b"BroadcastChannel('hs-present-'", body)
+                self.assertNotIn(b"hs-hit", body)  # the presenter helper is a different mode
+            finally:
+                p.stop()
+
     def test_helper_appended_without_body_tag(self) -> None:
         self.assertTrue(preview.inject_present_helper("<p>x</p>").endswith("</script>"))
 

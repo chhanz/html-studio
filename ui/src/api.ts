@@ -111,7 +111,7 @@ export function makeClient(api: AppApi) {
     previewStop: (path: string) => wrap(api.post<{ stopped: boolean }>(`${API}/preview/stop`, { path })),
     buildInfo: (path: string) => wrap(api.post<BuildInfo>(`${API}/build/info`, { path })),
     build: (path: string, trust = false) => wrap(api.post<BuildResult>(`${API}/build`, { path, trust })),
-    present: (path: string, slide?: number) => wrap(api.post<{ url: string }>(`${API}/present`, { path, slide })),
+    present: (path: string, slide?: number, mode?: 'audience') => wrap(api.post<{ url: string; opened: boolean }>(`${API}/present`, { path, slide, mode })),
     pdfStart: (path: string) => wrap(api.post<PdfJob>(`${API}/pdf`, { path })),
     pdfStatus: (id: string) => wrap(api.get<PdfJob>(`${API}/pdf?id=${encodeURIComponent(id)}`)),
     reveal: (path: string, file: string) => wrap(api.post<{ revealed: string }>(`${API}/reveal`, { path, file })),

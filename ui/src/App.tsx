@@ -10,6 +10,7 @@ import { NotesPanel } from './components/NotesPanel'
 import { DeckPanel } from './components/DeckPanel'
 import { PinsPanel } from './components/PinsPanel'
 import { Presenter } from './components/Presenter'
+import { PresenterView } from './components/PresenterView'
 import { QuickChips } from './components/QuickChips'
 import { Section, useCollapsed } from './components/Section'
 import { SlideStrip } from './components/SlideStrip'
@@ -504,6 +505,7 @@ export default function HtmlStudio() {
   }, [selected?.path])
 
   const [presenting, setPresenting] = useState(false)
+  const [presenterView, setPresenterView] = useState(false)
   const present = useCallback(() => {
     if (!selected || !outputUrl) return
     setPresenting(true)
@@ -866,6 +868,9 @@ export default function HtmlStudio() {
               <SmallBtn onClick={presentInBrowser} disabled={!outputUrl} title={t('present.browser_hint')} aria-label={t('present.browser')}>
                 ↗
               </SmallBtn>
+              <SmallBtn onClick={() => setPresenterView(true)} disabled={!preview} title={t('presenter.hint')}>
+                {t('toolbar.presenter')}
+              </SmallBtn>
               <SmallBtn
                 onClick={() => void exportPdf()}
                 disabled={!preview || pdf?.state === 'running'}
@@ -1056,6 +1061,18 @@ export default function HtmlStudio() {
         </div>
         </div>
       </div>
+      {presenterView && selected && preview && (
+        <PresenterView
+          t={t}
+          client={client}
+          deckPath={selected.path}
+          preview={preview}
+          outputUrl={outputUrl}
+          start={current}
+          onClose={() => setPresenterView(false)}
+          onPosition={setCurrent}
+        />
+      )}
       {presenting && selected && outputUrl && preview && (
         <Presenter
           t={t}

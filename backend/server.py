@@ -44,7 +44,7 @@ CHECK_JOBS = check_lib.CheckJobs()
 PREVIEWS = preview_lib.PreviewRegistry()
 
 APP_NAME = os.environ.get("KIROCREW_APP_NAME", "html-studio")
-APP_VERSION = "0.1.17"
+APP_VERSION = "0.1.18"
 PORT = int(os.environ.get("PORT", "9100"))
 HOME = Path(os.environ.get("KIROCREW_HOME", str(Path.home() / ".kiro" / "crew")))
 DATA_DIR = HOME / "apps" / APP_NAME / "data"
@@ -568,13 +568,18 @@ def route_present(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
     base, output = target
     slide = body.get("slide")
     frag = f"#{int(slide)}" if isinstance(slide, int) and slide > 0 else ""
-    url = f"{base}/{output}{frag}"
+    # mode "audience": the deck gets the presenter bridge (inject/audience.js) so the
+    # studio's presenter view can drive it and point at it.
+    query = "?hs=audience" if body.get("mode") == "audience" else ""
+    url = f"{base}/{output}{query}{frag}"
+    if os.environ.get("HTML_STUDIO_NO_OPEN"):  # tests: never launch a browser
+        return 200, {"url": url, "opened": False}
     opener = ["open", url] if sys.platform == "darwin" else ["xdg-open", url]
     try:
         subprocess.Popen(opener, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except OSError as exc:
         return 500, {"error": "open_failed", "detail": str(exc)}
-    return 200, {"url": url}
+    return 200, {"url": url, "opened": True}
 
 
 def route_pdf_start(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:

@@ -645,3 +645,67 @@ test('speaker notes: autosaves notes/<slide>.md, marks the thumbnail, survives r
   expect(idx.withNotes).toEqual([])
   await expect(page.locator('#slides-body li').nth(0).getByTestId('strip-note')).toHaveCount(0)
 })
+
+test('presenter view: notes, next slide, timer; drives and follows a real audience window; laser and black', async ({ page, context }) => {
+  await openApp(page)
+  await addFixtureRoot(page)
+  await selectDeck(page, 'acme-quarterly')
+  const home = await fakeHome(page)
+  const deckPath = `${home}/decks/acme-quarterly`
+  // Prepare: a note on slide 2, and a build so the audience window exists.
+  await page.request.post('/apps/html-studio/api/note', { data: { path: deckPath, slide: '020_agenda.html', text: '- Three items\n- Keep it short' } })
+  await page.getByRole('button', { name: /^Build$/ }).click()
+  await expect(page.getByRole('status').filter({ hasText: /Build succeeded/ })).toBeVisible()
+  await page.getByRole('group', { name: /^View$/ }).getByRole('button', { name: /^Slides$/ }).click()
+
+  await page.getByRole('button', { name: /^Presenter view$/ }).click()
+  const view = page.getByTestId('presenter-view')
+  await expect(view).toHaveAttribute('data-slide', '1')
+  await expect(view).toHaveAttribute('data-audience', 'none')
+  await expect(page.getByTestId('presenter-notes')).toContainText('No notes for this slide')
+  await expect(view).toContainText('Next: slide 2')
+  await expect(page.getByTestId('presenter-timer')).toHaveText(/^00:0\d$/)
+
+  // "Audience window" asks the backend for the URL (no browser launch in tests); open it ourselves.
+  const audienceUrl = (await (await page.request.post('/apps/html-studio/api/present', { data: { path: deckPath, slide: 1, mode: 'audience' } })).json()).url as string
+  expect(audienceUrl).toMatch(/\/out\/index\.html\?hs=audience#1$/)
+  const audience = await context.newPage()
+  await audience.goto(audienceUrl)
+  await expect(audience.locator('#hs-counter')).toHaveText('1 / 4')
+  await expect(view).toHaveAttribute('data-audience', 'connected')
+
+  // Presenter navigates: notes and next slide update, the audience follows.
+  await page.keyboard.press('ArrowRight')
+  await expect(view).toHaveAttribute('data-slide', '2')
+  await expect(page.getByTestId('presenter-notes')).toContainText('Keep it short')
+  await expect(view).toContainText('Next: slide 3')
+  await expect(audience.locator('#hs-counter')).toHaveText('2 / 4')
+
+  // Audience navigates on its own (clicker on the projector machine): the presenter follows.
+  await audience.locator('body').click()
+  await audience.keyboard.press('ArrowRight')
+  await expect(audience.locator('#hs-counter')).toHaveText('3 / 4')
+  await expect(view).toHaveAttribute('data-slide', '3')
+
+  // Laser: pointer over the presenter's current slide lights the dot in the audience window.
+  const stage = page.getByTestId('presenter-current').getByTestId('slide-stage')
+  const box = (await stage.boundingBox())!
+  await page.mouse.move(box.x + box.width * 0.25, box.y + box.height * 0.5)
+  await expect(view).toContainText('laser')
+  const dot = audience.locator('div[style*="rgba(255, 40, 40"]')
+  await expect(dot).toBeVisible()
+  await page.mouse.move(5, 5) // off the slide
+  await expect(dot).toBeHidden()
+
+  // Black screen toggles in the audience window.
+  await page.keyboard.press('b')
+  await expect(audience.locator('div[style*="background: rgb(0, 0, 0)"][style*="display: block"]')).toHaveCount(1)
+  await page.keyboard.press('b')
+  await expect(audience.locator('div[style*="background: rgb(0, 0, 0)"][style*="display: block"]')).toHaveCount(0)
+
+  // Esc closes the presenter and the studio lands on the slide we ended on.
+  await page.keyboard.press('Escape')
+  await expect(view).toHaveCount(0)
+  await expect(page.getByText('3 / 4')).toBeVisible()
+  await audience.close()
+})

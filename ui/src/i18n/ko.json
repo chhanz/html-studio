@@ -185,5 +185,21 @@
   "notes.save_failed": "저장 실패",
   "notes.orphans": "슬라이드 없는 노트 {n}개",
   "notes.show": "보기",
-  "strip.has_notes": "노트 있음"
+  "strip.has_notes": "노트 있음",
+  "toolbar.presenter": "발표자 뷰",
+  "presenter.hint": "발표자 화면: 현재/다음 슬라이드, 노트, 타이머. 청중 창은 브라우저로 엽니다",
+  "presenter.title": "발표자 뷰",
+  "presenter.current": "슬라이드 {n} / {total}",
+  "presenter.next": "다음: {n}번",
+  "presenter.last": "마지막 슬라이드",
+  "presenter.notes": "노트",
+  "presenter.no_notes": "이 슬라이드에는 노트가 없습니다.",
+  "presenter.laser_on": "레이저",
+  "presenter.audience_connected": "청중 창 연결됨",
+  "presenter.audience_none": "청중 창 없음",
+  "presenter.open_audience": "청중 창",
+  "presenter.open_audience_hint": "빌드된 덱을 시스템 브라우저로 엽니다. 프로젝터 화면으로 옮기고 F로 전체화면",
+  "presenter.black": "블랙",
+  "presenter.black_hint": "청중 화면을 검게 (B)",
+  "presenter.keys": "화살표: 이동. 슬라이드 위에서 마우스를 움직이면 레이저. B: 블랙. Esc: 닫기."
 }
