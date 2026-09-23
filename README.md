@@ -1,5 +1,7 @@
 # HTML Studio
 
+**English** | [한국어](README.ko.md)
+
 A [Kiro Crew](https://kiro.dev) app for viewing, editing, checking and presenting HTML slide decks, side by side with the agent that writes them.
 
 ![HTML Studio: strip of thumbnails, live preview, notes and deck chat](assets/docs/overview.png)

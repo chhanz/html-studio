@@ -1,5 +1,7 @@
 # HTML Studio
 
+[English](README.md) | **한국어**
+
 HTML 슬라이드 덱을 보고, 고치고, 점검하고, 발표하는 [Kiro Crew](https://kiro.dev) 앱입니다. 덱을 만드는 에이전트와 같은 폴더에서 나란히 일합니다.
 
 ![HTML Studio: 썸네일 스트립, 라이브 미리보기, 노트와 덱 채팅](assets/docs/overview.png)
