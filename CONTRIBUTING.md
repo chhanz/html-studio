@@ -48,6 +48,10 @@ cd .. && ./verify.sh
 - One change per commit, English message: a short imperative first line, then why it was done and what a reader should know.
 - A pull request describes what changed for the user, how it was verified, and anything left out on purpose.
 
+## Licence of contributions
+
+By contributing you agree that your contribution is licensed under the Apache License 2.0, the licence of this repository (see `LICENSE`). Third-party assets you add go into `ATTRIBUTION.md` with their own licence.
+
 ## Reporting issues
 
 Please include the deck shape (split or single file, with or without `studio.json` and `DESIGN.md`), what you did, what you expected, and the backend version shown in the status line. A minimal deck that reproduces the problem is the most useful attachment.

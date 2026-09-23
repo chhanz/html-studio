@@ -79,4 +79,4 @@ kirocrew app enable html-studio
 
 ## 라이선스
 
-MIT. 포함된 글꼴과 아이콘은 [ATTRIBUTION.md](ATTRIBUTION.md)에 있습니다.
+Apache License 2.0. [LICENSE](LICENSE)와 [NOTICE](NOTICE)를 보세요. 포함된 글꼴과 아이콘은 [ATTRIBUTION.md](ATTRIBUTION.md)에 있습니다.

@@ -84,4 +84,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for conventions. Korean documentation: [R
 
 ## License
 
-MIT. Bundled fonts and icons are listed in [ATTRIBUTION.md](ATTRIBUTION.md).
+Apache License 2.0; see [LICENSE](LICENSE) and [NOTICE](NOTICE). Bundled fonts and icons are listed in [ATTRIBUTION.md](ATTRIBUTION.md).
