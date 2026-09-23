@@ -63,7 +63,7 @@ kirocrew app install /path/to/html-studio
 kirocrew app enable html-studio
 ```
 
-대시보드 사이드바에서 **HTML Studio**를 열고, 덱이 든 폴더를 추가한 뒤 하나를 고릅니다. 백엔드는 대시보드가 시작하는 Python 3.11+ 표준 라이브러리 서버이고, 점검과 PDF에는 Chromium 계열 브라우저가 필요합니다(자동으로 찾음).
+대시보드 사이드바에서 **HTML Studio**를 열고, 덱이 든 폴더를 추가한 뒤 하나를 고릅니다. 백엔드는 대시보드가 시작하는 Python 3.9 이상, 표준 라이브러리만 쓰는 서버이고, 점검과 PDF에는 Chromium 계열 브라우저가 필요합니다(자동으로 찾음).
 
 ## 개발
 

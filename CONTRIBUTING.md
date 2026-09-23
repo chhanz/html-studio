@@ -5,7 +5,7 @@ Thanks for looking at HTML Studio. This page covers how the project is put toget
 ## Layout
 
 ```
-backend/        Python 3.11+, standard library only; one module per feature
+backend/        Python 3.9 or newer, standard library only; one module per feature
 backend/inject/ scripts and pages the preview server injects or serves (select overlay, check, presenter)
 backend/layouts/ built-in slide layouts
 backend/tests/  unittest suites (one file per module)
