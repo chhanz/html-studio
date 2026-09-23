@@ -2,10 +2,13 @@
 
 A [Kiro Crew](https://kiro.dev) app for viewing, editing, checking and presenting HTML slide decks.
 
-- Browse decks (one HTML file per slide) and preview them live
+- Browse decks (one HTML file per slide, or one file with sections) and preview them live
 - Point at an element in the preview, leave a comment, and let the agent apply the change
 - Run deck checks (overflow, forbidden patterns, missing cover, contrast)
-- Present from the current slide, with speaker notes and a pen that draws on the show
+- Edit a slide's HTML in place with syntax colouring; reorder, add from a layout library, archive and restore slides
+- Start a new deck from a short wizard (title, audience, purpose, theme) and hand the brief to the agent
+- Present from the current slide: fullscreen show in the app, presenter window in the browser (notes, next slide, timer, pen)
+- Edit the theme live and write it back to DESIGN.md and tokens.css
 - Export to PDF
 - Themes follow the [DESIGN.md](https://github.com/VoltAgent/awesome-design-md) format
 
