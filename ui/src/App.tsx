@@ -1,7 +1,7 @@
 import { useAppApi } from '@kirocrew/app-sdk'
 import { Card, CardTitle, PageHeader } from '@kirocrew/app-sdk/ui'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ApiError, type BackendStatus, type BuildInfo, type BuildResult, type CheckIssue, type CheckJob, type CheckResult, type Deck, type DesignInfo, type NotesIndex, type PdfJob, type PreviewInfo, makeClient } from './api'
+import { ApiError, type BackendStatus, type BuildInfo, type BuildResult, type CheckIssue, type CheckJob, type CheckResult, type Deck, type DesignInfo, type NotesIndex, type PdfJob, type PreviewInfo, type Arranged, type ArchivedSlide, makeClient } from './api'
 import { openDeckChat } from './chat'
 import { BuildPanel } from './components/BuildPanel'
 import { CheckPanel, issueKey } from './components/CheckPanel'
@@ -13,7 +13,7 @@ import { PinsPanel } from './components/PinsPanel'
 import { Presenter } from './components/Presenter'
 import { QuickChips } from './components/QuickChips'
 import { Section, useCollapsed } from './components/Section'
-import { SlideStrip } from './components/SlideStrip'
+import { SlideStrip, type ArrangeActions } from './components/SlideStrip'
 import { SlideViewer } from './components/SlideViewer'
 import { SmallBtn } from './components/SmallBtn'
 import { ThemeRow } from './components/ThemeRow'
@@ -422,6 +422,77 @@ export default function HtmlStudio() {
   }, [selected?.path])
   const withNotes = useMemo(() => new Set(notesIndex?.withNotes ?? []), [notesIndex])
 
+  // P3-2: slide arrangement (reorder / add / duplicate / archive / restore).
+  // The backend renames files and answers with the new slide list; the preview
+  // keeps its server, only its slide list changes.
+  const [arrangeBusy, setArrangeBusy] = useState(false)
+  const [arrangeError, setArrangeError] = useState<string | null>(null)
+  const [archived, setArchived] = useState<ArchivedSlide[]>([])
+  const [archiveOpen, setArchiveOpen] = useState(false)
+  useEffect(() => {
+    setArchived([])
+    setArrangeError(null)
+    if (!selected) return
+    let alive = true
+    void client.slidesArchiveList(selected.path).then((r) => alive && setArchived(r.items)).catch(() => undefined)
+    return () => {
+      alive = false
+    }
+  }, [client, selected?.path]) // eslint-disable-line react-hooks/exhaustive-deps
+  const applyArranged = useCallback(
+    (res: Arranged, focus?: string) => {
+      setPreview((p) => (p ? { ...p, slides: res.slides } : p))
+      if (selected) setDecks((ds) => ds.map((d) => (d.id === selected.id ? { ...d, slideCount: res.slides.length } : d)))
+      setReloadKey((k) => k + 1)
+      setNotesRefresh((k) => k + 1)
+      setNotesIndex(null)
+      if (focus) {
+        const i = res.slides.indexOf(focus)
+        if (i >= 0) setCurrent(i)
+      } else setCurrent((c) => Math.min(c, Math.max(0, res.slides.length - 1)))
+      if (res.rebuild && 'ok' in res.rebuild) {
+        setBuildResult(res.rebuild)
+        if (selected) void client.buildInfo(selected.path).then(setBuildInfo).catch(() => undefined)
+      }
+      if (selected) void client.slidesArchiveList(selected.path).then((r) => setArchived(r.items)).catch(() => undefined)
+    },
+    [client, selected],
+  )
+  const runArrange = useCallback(
+    async (op: () => Promise<Arranged & { name?: string }>, focusFromName = true) => {
+      setArrangeBusy(true)
+      setArrangeError(null)
+      try {
+        const res = await op()
+        applyArranged(res, focusFromName ? res.name : undefined)
+      } catch (e) {
+        setArrangeError(e instanceof ApiError ? e.code : 'request_failed')
+      } finally {
+        setArrangeBusy(false)
+      }
+    },
+    [applyArranged],
+  )
+  const arrangeActions = useMemo<ArrangeActions | undefined>(
+    () =>
+      selected
+        ? {
+            busy: arrangeBusy,
+            onReorder: (order) => {
+              const focus = preview?.slides[current]
+              const at = focus ? order.indexOf(focus) : -1
+              void runArrange(async () => {
+                const res = await client.slidesReorder(selected.path, order)
+                return { ...res, name: at >= 0 ? res.slides[at] : undefined }
+              })
+            },
+            onAdd: (after, duplicate) => void runArrange(() => client.slidesAdd(selected.path, after, duplicate)),
+            onArchive: (slide) => void runArrange(() => client.slidesArchive(selected.path, slide), false),
+          }
+        : undefined,
+    [selected, arrangeBusy, preview, current, runArrange, client],
+  )
+
   // P1-8: DESIGN.md recognition. Read-only until the user asks for tokens.css.
   const [designInfo, setDesignInfo] = useState<DesignInfo | null>(null)
   const [tokensBusy, setTokensBusy] = useState(false)
@@ -814,7 +885,44 @@ export default function HtmlStudio() {
               {selected ? (
                 preview ? (
                   preview.slides.length ? (
-                    <SlideStrip preview={preview} current={current} onSelect={setCurrent} reloadKey={reloadKey} withNotes={withNotes} notesLabel={t('strip.has_notes')} />
+                    <>
+                      <SlideStrip t={t} preview={preview} current={current} onSelect={setCurrent} reloadKey={reloadKey} withNotes={withNotes} notesLabel={t('strip.has_notes')} arrange={arrangeActions} />
+                      {arrangeError && (
+                        <p className="m-0 mt-2 text-[12px]" role="alert" style={{ color: 'var(--danger)' }}>
+                          {t('error.generic', { code: arrangeError })}
+                        </p>
+                      )}
+                      {archived.length > 0 && (
+                        <div className="mt-3 text-[12px]" data-testid="archive-list">
+                          <button
+                            type="button"
+                            onClick={() => setArchiveOpen((v) => !v)}
+                            aria-expanded={archiveOpen}
+                            className="w-full text-left bg-transparent border-0 p-0 cursor-pointer text-muted hover:text-text"
+                          >
+                            {archiveOpen ? '▾' : '▸'} {t('strip.archive_box', { n: archived.length })}
+                          </button>
+                          {archiveOpen && (
+                            <ul className="m-0 mt-1 p-0 list-none flex flex-col gap-1">
+                              {archived.map((a) => (
+                                <li key={a.name} className="flex items-center gap-2">
+                                  <span className="truncate flex-1 text-muted" title={a.file}>
+                                    {a.name}
+                                  </span>
+                                  <SmallBtn
+                                    disabled={arrangeBusy}
+                                    onClick={() => void runArrange(() => client.slidesRestore(selected.path, a.name, preview.slides[current] ?? null))}
+                                    title={t('strip.restore_hint')}
+                                  >
+                                    {t('strip.restore')}
+                                  </SmallBtn>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      )}
+                    </>
                   ) : (
                     <p className="m-0 text-[12px] text-muted">{t('deck.summary.no_slides')}</p>
                   )

@@ -141,7 +141,7 @@ test('builds a slides deck with the built-in assembler and shows the output', as
   await outFrame.locator('.slide.active').click()
   await page.keyboard.press('ArrowRight')
   await expect(outFrame.locator('#hs-counter')).toHaveText('4 / 4')
-  await expect(page.locator('#slides-body li').nth(3).getByRole('button')).toHaveAttribute('aria-current', 'true')
+  await expect(page.locator('#slides-body li').nth(3).locator('> button')).toHaveAttribute('aria-current', 'true')
 
   await toggle.getByRole('button', { name: /^Slides$/ }).click()
   await expect(page.getByText('4 / 4')).toBeVisible()
@@ -826,4 +826,70 @@ test('code view edits a slide: highlighted source, Save writes, preview and buil
   await expect(ta).toHaveValue(/Agent wrote this/)
   await expect(editor.getByRole('button', { name: 'Save' })).toBeDisabled()
   await expect(editor.getByRole('alert')).toHaveCount(0)
+})
+
+test('strip arranges slides: add, duplicate, drag to reorder, archive and restore; notes follow their slide', async ({ page }) => {
+  await openApp(page)
+  await addFixtureRoot(page)
+  await selectDeck(page, 'acme-quarterly')
+  const home = await fakeHome(page)
+  const deckPath = `${home}/decks/acme-quarterly`
+  await page.request.post('/apps/html-studio/api/note', { data: { path: deckPath, slide: '020_agenda.html', text: '- agenda note' } })
+  const items = page.locator('#slides-body ol > li')
+  await expect(items).toHaveCount(4)
+  const names = () => items.locator('> button').evaluateAll((els) => els.map((e) => e.getAttribute('title')))
+
+  // Add after slide 2: a blank slide appears as slide 3 and becomes current; later slides are renumbered.
+  await items.nth(1).locator('> button').click()
+  await page.getByTestId('strip-add').click()
+  await expect(items).toHaveCount(5)
+  expect(await names()).toEqual(['010_cover.html', '020_agenda.html', '030_new.html', '040_uptime.html', '050_roadmap.html'])
+  await expect(page.locator('#slides-body [aria-current="true"]')).toContainText('030_new.html')
+  await expect(page.frameLocator('[data-testid="slide-stage"] iframe').locator('h2')).toHaveText('New slide')
+
+  // Duplicate the agenda from its menu.
+  await items.nth(1).locator('> button').click()
+  await page.getByRole('button', { name: 'Slide actions' }).click()
+  await page.getByRole('menuitem', { name: 'Duplicate' }).click()
+  await expect(items).toHaveCount(6)
+  expect(await names()).toEqual(['010_cover.html', '020_agenda.html', '030_agenda-copy.html', '040_new.html', '050_uptime.html', '060_roadmap.html'])
+  await expect(page.locator('#slides-body [aria-current="true"]')).toContainText('030_agenda-copy.html')
+
+  // Move down via the menu, then drag the cover onto the third slide (it lands after it).
+  await page.getByRole('button', { name: 'Slide actions' }).click()
+  await page.getByRole('menuitem', { name: 'Move down' }).click()
+  await expect.poll(names).toEqual(['010_cover.html', '020_agenda.html', '030_new.html', '040_agenda-copy.html', '050_uptime.html', '060_roadmap.html'])
+  const drag = async (from: number, to: number) => {
+    const a = (await items.nth(from).boundingBox())!
+    const b = (await items.nth(to).boundingBox())!
+    await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2 + 15, { steps: 3 })
+    await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 8 })
+    await page.mouse.up()
+  }
+  await items.nth(0).locator('> button').click() // selecting scrolls it into view: the strip is taller than its box
+  await drag(0, 2)
+  await expect.poll(names).toEqual(['010_agenda.html', '020_new.html', '030_cover.html', '040_agenda-copy.html', '050_uptime.html', '060_roadmap.html'])
+  // The note followed the agenda slide to its new name.
+  const notes = await (await page.request.get(`/apps/html-studio/api/notes?path=${encodeURIComponent(deckPath)}`)).json()
+  expect(notes.withNotes).toEqual(['010_agenda.html'])
+  await expect(items.nth(0).getByTestId('strip-note')).toBeVisible()
+
+  // Archive the blank slide: it leaves the strip and shows up in the archive box; restore puts it back after the current slide.
+  await items.nth(1).locator('> button').click()
+  await page.getByRole('button', { name: 'Slide actions' }).click()
+  await page.getByRole('menuitem', { name: 'Archive' }).click()
+  await expect(items).toHaveCount(5)
+  expect(await names()).not.toContain('020_new.html')
+  const box = page.getByTestId('archive-list')
+  await expect(box).toContainText('Archive (1)')
+  await box.getByRole('button', { name: /Archive \(1\)/ }).click()
+  await expect(box).toContainText('020_new.html')
+  await items.nth(4).locator('> button').click() // current = last (roadmap)
+  await box.getByRole('button', { name: 'Restore' }).click()
+  await expect(items).toHaveCount(6)
+  expect(await names()).toEqual(['010_agenda.html', '020_cover.html', '030_agenda-copy.html', '040_uptime.html', '050_roadmap.html', '060_new.html'])
+  await expect(box).toHaveCount(0)
+  await expect(page.locator('#slides-body [aria-current="true"]')).toContainText('060_new.html')
 })

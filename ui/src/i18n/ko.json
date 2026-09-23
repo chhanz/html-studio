@@ -206,5 +206,14 @@
   "code.conflict_reload": "디스크에서 다시 불러오기",
   "code.conflict_overwrite": "내 변경으로 덮어쓰기",
   "code.hint": "Tab 들여쓰기. 저장하면 미리보기와 스트립이 갱신되고, 빌드된 덱은 다시 빌드됩니다.",
-  "split.code_label": "편집기와 미리보기 크기 조절"
+  "split.code_label": "편집기와 미리보기 크기 조절",
+  "strip.add": "+ 이 다음에 슬라이드 추가",
+  "strip.menu": "슬라이드 작업",
+  "strip.move_up": "위로",
+  "strip.move_down": "아래로",
+  "strip.duplicate": "복제",
+  "strip.archive": "보관",
+  "strip.archive_box": "보관함 ({n})",
+  "strip.restore": "복원",
+  "strip.restore_hint": "현재 슬라이드 다음으로 되돌립니다"
 }

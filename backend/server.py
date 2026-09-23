@@ -36,6 +36,7 @@ import design as design_lib  # noqa: E402
 import pinqueue as queue_lib  # noqa: E402
 import check as check_lib  # noqa: E402
 import source as source_lib  # noqa: E402
+import arrange as arrange_lib  # noqa: E402
 import notes as notes_lib  # noqa: E402
 import export as export_lib  # noqa: E402
 
@@ -45,7 +46,7 @@ CHECK_JOBS = check_lib.CheckJobs()
 PREVIEWS = preview_lib.PreviewRegistry()
 
 APP_NAME = os.environ.get("KIROCREW_APP_NAME", "html-studio")
-APP_VERSION = "0.1.23"
+APP_VERSION = "0.1.24"
 PORT = int(os.environ.get("PORT", "9100"))
 HOME = Path(os.environ.get("KIROCREW_HOME", str(Path.home() / ".kiro" / "crew")))
 DATA_DIR = HOME / "apps" / APP_NAME / "data"
@@ -470,16 +471,80 @@ def route_source_put(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
         return 400 if exc.code in ("too_large", "not_one_section") else 404, {"error": exc.code}
     except OSError as exc:
         return 500, {"error": "write_failed", "detail": str(exc)}
-    contract = build_lib.build_contract(deck, info.get("entry"))
-    if contract["outputExists"]:
-        if contract["command"] and not build_lib.is_trusted(DATA_DIR, deck, contract["command"]):
-            result["rebuild"] = {"skipped": "needs_trust"}
-        else:
-            try:
-                result["rebuild"] = build_lib.build(DATA_DIR, deck, info["slidesDir"], entry=info.get("entry"), css_rel=_deck_css(deck))
-            except build_lib.BuildError as exc:
-                result["rebuild"] = {"skipped": exc.code}
+    _maybe_rebuild(deck, info, result)
     return 200, result
+
+
+def _maybe_rebuild(deck: Path, info: dict[str, Any], result: dict[str, Any]) -> None:
+    """After an edit: rebuild a deck whose output exists, unless its external
+    command still needs consent. The outcome goes into ``result["rebuild"]``."""
+    contract = build_lib.build_contract(deck, info.get("entry"))
+    if not contract["outputExists"]:
+        return
+    if contract["command"] and not build_lib.is_trusted(DATA_DIR, deck, contract["command"]):
+        result["rebuild"] = {"skipped": "needs_trust"}
+        return
+    try:
+        result["rebuild"] = build_lib.build(DATA_DIR, deck, info["slidesDir"], entry=info.get("entry"), css_rel=_deck_css(deck))
+    except build_lib.BuildError as exc:
+        result["rebuild"] = {"skipped": exc.code}
+
+
+# --- slide arrangement (reorder / add / archive / restore) -------------------
+def _arrange(body: dict[str, Any], op: Callable[[Path, dict[str, Any]], dict[str, Any]]) -> tuple[int, Any]:
+    deck = _deck_under_roots(str(body.get("path", "")))
+    if deck is None:
+        return 400, {"error": "deck_not_allowed"}
+    info = deck_lib.describe_deck(deck, deck)
+    if info is None:
+        return 404, {"error": "not_a_deck"}
+    try:
+        result = op(deck, info)
+    except arrange_lib.ArrangeError as exc:
+        return 400 if exc.code in ("bad_order", "last_slide", "not_one_section", "no_sections") else 404, {"error": exc.code}
+    except OSError as exc:
+        return 500, {"error": "write_failed", "detail": str(exc)}
+    after = deck_lib.describe_deck(deck, deck)
+    result["slides"] = list(after["slides"]) if after else []
+    _maybe_rebuild(deck, info, result)
+    return 200, result
+
+
+def route_slides_reorder(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
+    """POST /slides/reorder {path, order: [names]}: the full new order (a permutation)."""
+    order = body.get("order")
+    if not isinstance(order, list) or not all(isinstance(x, str) for x in order):
+        return 400, {"error": "bad_order"}
+    return _arrange(body, lambda deck, info: {"order": arrange_lib.reorder(deck, info["slidesDir"], info.get("entry"), order)})
+
+
+def route_slides_add(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
+    """POST /slides/add {path, after?, duplicate?}: a new (or copied) slide after ``after``."""
+    after = body.get("after")
+    if after is not None and not isinstance(after, str):
+        return 400, {"error": "unknown_slide"}
+    return _arrange(body, lambda deck, info: {"name": arrange_lib.add(deck, info["slidesDir"], info.get("entry"), after, bool(body.get("duplicate")))})
+
+
+def route_slides_archive(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
+    """POST /slides/archive {path, slide}: move the slide (and note) into archive/."""
+    return _arrange(body, lambda deck, info: arrange_lib.archive(deck, info["slidesDir"], info.get("entry"), str(body.get("slide", ""))))
+
+
+def route_slides_restore(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
+    """POST /slides/restore {path, name, after?}: bring an archived slide back."""
+    after = body.get("after")
+    if after is not None and not isinstance(after, str):
+        return 400, {"error": "unknown_slide"}
+    return _arrange(body, lambda deck, info: {"name": arrange_lib.restore(deck, info["slidesDir"], info.get("entry"), str(body.get("name", "")), after)})
+
+
+def route_slides_archive_list(h: "Handler", _body: dict[str, Any]) -> tuple[int, Any]:
+    """GET /slides/archive?path=<deck>: archived slides, newest first."""
+    deck = _deck_under_roots(parse_qs(urlsplit(h.path).query).get("path", [""])[0])
+    if deck is None:
+        return 400, {"error": "deck_not_allowed"}
+    return 200, {"items": arrange_lib.list_archive(deck)}
 
 
 # --- deck check -------------------------------------------------------------
@@ -704,6 +769,11 @@ ROUTES: dict[tuple[str, str], Route] = {
     ("POST", "/note"): route_note_put,
     ("GET", "/source"): route_source_get,
     ("POST", "/source"): route_source_put,
+    ("POST", "/slides/reorder"): route_slides_reorder,
+    ("POST", "/slides/add"): route_slides_add,
+    ("POST", "/slides/archive"): route_slides_archive,
+    ("POST", "/slides/restore"): route_slides_restore,
+    ("GET", "/slides/archive"): route_slides_archive_list,
     ("POST", "/check"): route_check_start,
     ("GET", "/check"): route_check_status,
     ("POST", "/pins/send"): route_pins_send,

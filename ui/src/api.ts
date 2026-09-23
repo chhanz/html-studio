@@ -121,6 +121,11 @@ export function makeClient(api: AppApi) {
     sourceGet: (path: string, slide: string) => wrap(api.get<SlideSource>(`${API}/source?path=${encodeURIComponent(path)}&slide=${encodeURIComponent(slide)}`)),
     sourceSave: (path: string, slide: string, text: string, mtime: number | null) =>
       wrap(api.post<SourceSaved>(`${API}/source`, mtime === null ? { path, slide, text } : { path, slide, text, mtime })),
+    slidesReorder: (path: string, order: string[]) => wrap(api.post<Arranged & { order: string[] }>(`${API}/slides/reorder`, { path, order })),
+    slidesAdd: (path: string, after: string | null, duplicate = false) => wrap(api.post<Arranged & { name: string }>(`${API}/slides/add`, { path, after, duplicate })),
+    slidesArchive: (path: string, slide: string) => wrap(api.post<Arranged & { name: string; file: string }>(`${API}/slides/archive`, { path, slide })),
+    slidesRestore: (path: string, name: string, after: string | null) => wrap(api.post<Arranged & { name: string }>(`${API}/slides/restore`, { path, name, after })),
+    slidesArchiveList: (path: string) => wrap(api.get<{ items: ArchivedSlide[] }>(`${API}/slides/archive?path=${encodeURIComponent(path)}`)),
     noteSave: (path: string, slide: string, text: string) => wrap(api.post<{ slide: string; file: string; exists: boolean }>(`${API}/note`, { path, slide, text })),
     checkStart: (path: string) => wrap(api.post<CheckJob>(`${API}/check`, { path })),
     checkStatus: (id: string) => wrap(api.get<CheckJob>(`${API}/check?id=${encodeURIComponent(id)}`)),
@@ -188,4 +193,6 @@ export type CheckJob = { id: string; state: 'running' | 'done' | 'error'; result
 export type NotesIndex = { withNotes: string[]; orphans: string[]; dir: string }
 export type SlideSource = { slide: string; file: string; kind: 'file' | 'section'; text: string; mtime: number }
 export type SourceSaved = { slide: string; file: string; mtime: number; rebuild?: BuildResult | { skipped: string } }
+export type Arranged = { slides: string[]; rebuild?: BuildResult | { skipped: string } }
+export type ArchivedSlide = { name: string; file: string; mtime: number; hasNote: boolean }
 export type Note = { slide: string; file: string; text: string }

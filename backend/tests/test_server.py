@@ -107,7 +107,7 @@ class ServerTest(unittest.TestCase):
         code, data = self.request("GET", "/api/status", signed=True)
         self.assertEqual(code, 200)
         self.assertEqual(data["app"], "html-studio")
-        self.assertEqual(data["version"], "0.1.23")
+        self.assertEqual(data["version"], "0.1.24")
         self.assertTrue(data["dataDir"].startswith(self.tmp.name))
 
     def test_signed_unknown_route_is_404(self) -> None:
@@ -306,6 +306,37 @@ class ServerTest(unittest.TestCase):
             self.assertIn("Drei", out.read_text())
             code, data = self.request("POST", "/api/source", signed=True, body=json.dumps({"path": str(deck), "slide": "zzz.html", "text": "x"}).encode())
             self.assertEqual((code, data["error"]), (404, "unknown_slide"))
+
+    def test_slides_arrange_routes(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.home()) as root:
+            deck = Path(root) / "deck"
+            (deck / "slides").mkdir(parents=True)
+            for n in ("010_a", "020_b", "030_c"):
+                (deck / "slides" / f"{n}.html").write_text(f"<section class='slide'><h1>{n}</h1></section>")
+            self.request("POST", "/api/roots/add", signed=True, body=json.dumps({"path": root}).encode())
+            post = lambda route, body: self.request("POST", f"/api/slides/{route}", signed=True, body=json.dumps({"path": str(deck), **body}).encode())  # noqa: E731
+            code, data = post("reorder", {"order": ["030_c.html", "010_a.html", "020_b.html"]})
+            self.assertEqual((code, data["slides"]), (200, ["010_c.html", "020_a.html", "030_b.html"]))
+            self.assertNotIn("rebuild", data)
+            code, data = post("reorder", {"order": ["010_c.html"]})
+            self.assertEqual((code, data["error"]), (400, "bad_order"))
+            code, data = post("add", {"after": "010_c.html"})
+            self.assertEqual((code, data["name"], data["slides"]), (200, "020_new.html", ["010_c.html", "020_new.html", "030_a.html", "040_b.html"]))
+            code, data = post("add", {"after": "040_b.html", "duplicate": True})
+            self.assertEqual((code, data["name"]), (200, "050_b-copy.html"))
+            code, data = post("archive", {"slide": "020_new.html"})
+            self.assertEqual((code, data["file"], data["slides"]), (200, "archive/020_new.html", ["010_c.html", "030_a.html", "040_b.html", "050_b-copy.html"]))
+            code, data = self.request("GET", "/api/slides/archive?path=" + urllib.parse.quote(str(deck)), signed=True)
+            self.assertEqual((code, [i["name"] for i in data["items"]]), (200, ["020_new.html"]))
+            # Built deck: a restore rebuilds.
+            code, built = self.request("POST", "/api/build", signed=True, body=json.dumps({"path": str(deck)}).encode())
+            self.assertEqual((code, built["ok"]), (200, True))
+            code, data = post("restore", {"name": "020_new.html", "after": None})
+            self.assertEqual((code, data["name"], data["rebuild"]["ok"]), (200, "050_new.html", True))
+            self.assertEqual(data["slides"], ["010_c.html", "020_a.html", "030_b.html", "040_b-copy.html", "050_new.html"])
+            self.assertIn("New slide", (deck / built["output"]).read_text())
+            code, data = post("restore", {"name": "../x.html"})
+            self.assertEqual((code, data["error"]), (404, "unknown_archive"))
 
     def test_notes_round_trip_and_orphans(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.home()) as root:

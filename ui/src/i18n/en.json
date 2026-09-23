@@ -206,5 +206,14 @@
   "code.conflict_reload": "Reload from disk",
   "code.conflict_overwrite": "Overwrite with mine",
   "code.hint": "Tab indents. Saving refreshes the preview and the strip; a built deck is rebuilt.",
-  "split.code_label": "Resize editor and preview"
+  "split.code_label": "Resize editor and preview",
+  "strip.add": "+ Add slide after this one",
+  "strip.menu": "Slide actions",
+  "strip.move_up": "Move up",
+  "strip.move_down": "Move down",
+  "strip.duplicate": "Duplicate",
+  "strip.archive": "Archive",
+  "strip.archive_box": "Archive ({n})",
+  "strip.restore": "Restore",
+  "strip.restore_hint": "Put this slide back after the current one"
 }
