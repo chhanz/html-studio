@@ -794,16 +794,17 @@ test('code view edits a slide: highlighted source, Save writes, preview and buil
   const built = await (await page.request.get(`/__ctl/read?path=${encodeURIComponent(deckPath + '/out/index.html')}`)).text()
   expect(built).toContain('Plan for today')
 
-  // The editor sits above the preview; dragging the handle changes the split and it is remembered.
+  // The preview sits above the editor; dragging the handle up gives the editor more room, and the split is remembered.
   const handle = page.getByTestId('code-split-handle')
   const before = (await editor.boundingBox())!.height
+  expect((await handle.boundingBox())!.y).toBeLessThan((await editor.boundingBox())!.y)
   const hb = (await handle.boundingBox())!
   await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2)
   await page.mouse.down()
   await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2 - 60, { steps: 5 })
   await page.mouse.up()
-  expect((await editor.boundingBox())!.height).toBeLessThan(before - 30)
-  expect(Number(await page.evaluate(() => localStorage.getItem('hs.codeRatio')))).toBeLessThan(0.55)
+  expect((await editor.boundingBox())!.height).toBeGreaterThan(before + 30)
+  expect(Number(await page.evaluate(() => localStorage.getItem('hs.codeRatio')))).toBeLessThan(0.45)
 
   // A draft survives switching slides and coming back.
   await ta.fill(original.replace('<h2>Agenda · 안건</h2>', '<h2>Draft heading</h2>'))

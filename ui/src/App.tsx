@@ -470,13 +470,13 @@ export default function HtmlStudio() {
     }
   })
   const rightColRef = useRef<HTMLDivElement>(null)
-  // Code view: share of the height given to the editor (over the preview), persisted.
+  // Code view: share of the height given to the preview (above the editor), persisted.
   const [codeRatio, setCodeRatio] = useState<number>(() => {
     try {
       const v = Number(localStorage.getItem('hs.codeRatio'))
-      return v >= 0.25 && v <= 0.85 ? v : 0.55
+      return v >= 0.15 && v <= 0.75 ? v : 0.45
     } catch {
-      return 0.55
+      return 0.45
     }
   })
   const codeViewRef = useRef<HTMLDivElement>(null)
@@ -487,7 +487,7 @@ export default function HtmlStudio() {
     const handle = e.currentTarget
     handle.setPointerCapture(e.pointerId)
     const rect = box.getBoundingClientRect()
-    const move = (ev: PointerEvent) => setCodeRatio(Math.min(0.85, Math.max(0.25, (ev.clientY - rect.top) / rect.height)))
+    const move = (ev: PointerEvent) => setCodeRatio(Math.min(0.75, Math.max(0.15, (ev.clientY - rect.top) / rect.height)))
     const up = () => {
       handle.removeEventListener('pointermove', move)
       handle.removeEventListener('pointerup', up)
@@ -976,6 +976,21 @@ export default function HtmlStudio() {
             viewMode === 'code' && preview.slides[current] ? (
               <div ref={codeViewRef} className="flex flex-col min-h-0 flex-1" data-testid="code-view">
                 <div className="min-w-0 min-h-0 flex flex-col overflow-hidden" style={{ flex: `0 0 calc(${Math.round(codeRatio * 1000) / 10}% - 6px)` }}>
+                  <SlideViewer t={t} preview={preview} current={current} onChange={setCurrent} reloadKey={reloadKey} />
+                </div>
+                <div
+                  role="separator"
+                  aria-orientation="horizontal"
+                  aria-label={t('split.code_label')}
+                  aria-valuenow={Math.round(codeRatio * 100)}
+                  data-testid="code-split-handle"
+                  onPointerDown={onCodeSplitterDown}
+                  className="flex-none flex items-center justify-center"
+                  style={{ flex: '0 0 12px', height: 12, cursor: 'row-resize', touchAction: 'none' }}
+                >
+                  <div className="rounded-full" style={{ flex: '0 0 3px', width: 40, height: 3, background: 'var(--border-strong, var(--border))', opacity: 0.8 }} />
+                </div>
+                <div className="min-w-0 min-h-0 flex flex-col flex-1 overflow-hidden">
                   <CodeEditor
                     t={t}
                     client={client}
@@ -992,21 +1007,6 @@ export default function HtmlStudio() {
                       }
                     }}
                   />
-                </div>
-                <div
-                  role="separator"
-                  aria-orientation="horizontal"
-                  aria-label={t('split.code_label')}
-                  aria-valuenow={Math.round(codeRatio * 100)}
-                  data-testid="code-split-handle"
-                  onPointerDown={onCodeSplitterDown}
-                  className="flex-none flex items-center justify-center"
-                  style={{ flex: '0 0 12px', height: 12, cursor: 'row-resize', touchAction: 'none' }}
-                >
-                  <div className="rounded-full" style={{ flex: '0 0 3px', width: 40, height: 3, background: 'var(--border-strong, var(--border))', opacity: 0.8 }} />
-                </div>
-                <div className="min-w-0 min-h-0 flex flex-col flex-1">
-                  <SlideViewer t={t} preview={preview} current={current} onChange={setCurrent} reloadKey={reloadKey} />
                 </div>
               </div>
             ) : viewMode === 'output' && outputUrl ? (
