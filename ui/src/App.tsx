@@ -1,19 +1,18 @@
 import { useAppApi } from '@kirocrew/app-sdk'
 import { Card, CardTitle, PageHeader } from '@kirocrew/app-sdk/ui'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ApiError, type BackendStatus, type BuildInfo, type BuildResult, type CheckIssue, type CheckJob, type CheckResult, type Deck, type DesignInfo, type NotesIndex, type PdfJob, type PreviewInfo, type Arranged, type ArchivedSlide, type NewDeckRequest, type Rebuild, makeClient } from './api'
-import { openDeckChat } from './chat'
+import { useCallback, useMemo, useState } from 'react'
+import { type Deck, type NewDeckRequest, makeClient } from './api'
 import { BuildPanel } from './components/BuildPanel'
-import { CheckPanel, issueKey } from './components/CheckPanel'
+import { CheckPanel } from './components/CheckPanel'
 import { DeckChat } from './components/DeckChat'
 import { NotesPanel } from './components/NotesPanel'
-import { CodeEditor, type Drafts } from './components/CodeEditor'
+import { CodeEditor } from './components/CodeEditor'
 import { DeckPanel } from './components/DeckPanel'
 import { PinsPanel } from './components/PinsPanel'
 import { Presenter } from './components/Presenter'
 import { QuickChips } from './components/QuickChips'
 import { Section, useCollapsed } from './components/Section'
-import { SlideStrip, type ArrangeActions } from './components/SlideStrip'
+import { SlideStrip } from './components/SlideStrip'
 import { LayoutPicker } from './components/LayoutPicker'
 import { NewDeckDialog } from './components/NewDeckDialog'
 import { TweakPanel } from './components/TweakPanel'
@@ -21,11 +20,17 @@ import { SlideViewer } from './components/SlideViewer'
 import { SmallBtn } from './components/SmallBtn'
 import { ThemeRow } from './components/ThemeRow'
 import { Spinner } from './components/Spinner'
+import { type Conn, useConnection } from './hooks/useConnection'
+import { useNotes } from './hooks/useNotes'
+import { usePreview } from './hooks/usePreview'
+import { useBuild } from './hooks/useBuild'
+import { useDeckChat } from './hooks/useDeckChat'
+import { usePins } from './hooks/usePins'
+import { useCheck } from './hooks/useCheck'
+import { useArrange } from './hooks/useArrange'
+import { useTheme } from './hooks/useTheme'
+import { useHeaderHeight, usePdf, useSplitRatio } from './hooks/useLayout'
 import { LOCALES, type LocalePref, useI18n } from './i18n'
-import { type Capture, type Pin, loadPins, newPin, savePins } from './pins'
-import { type QuickActionId, quickActionPrompt } from './quick'
-
-type Conn = 'connecting' | 'connected' | 'error'
 
 // NOTE on styling: the dashboard ships a precompiled Tailwind sheet, so only
 // utility classes the host itself uses are available (e.g. text-muted,
@@ -33,740 +38,59 @@ type Conn = 'connecting' | 'connected' | 'error'
 // must be expressed with inline styles or the host's CSS variables
 // (--accent, --muted, --border, --ok, --warn, --danger, --text, --card, --bg).
 
+/**
+ * The studio page. Each concern lives in a hook under ./hooks; this component
+ * wires them together and lays out the panes. Read top to bottom: connection
+ * and deck list, the preview of the selected deck, then everything that acts
+ * on it (build, chat, pins, check, arrange, theme, pdf), then the layout.
+ */
 export default function HtmlStudio() {
   const api = useAppApi()
   const client = useMemo(() => makeClient(api), [api])
   const { t, locale, pref, setPref } = useI18n()
 
-  const [conn, setConn] = useState<Conn>('connecting')
-  const [status, setStatus] = useState<BackendStatus | null>(null)
-  const [roots, setRoots] = useState<string[]>([])
-  const [decks, setDecks] = useState<Deck[]>([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [errorDetail, setErrorDetail] = useState<string | null>(null)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const { conn, status, roots, decks, setDecks, loading, error, errorDetail, selectedId, selected, decksForce, slidesForce, refresh, addRoot, removeRoot, selectDeck } = useConnection(client)
   const [sidebarOpen, setSidebarOpen] = useCollapsed('sidebar', true)
-  // null = leave the section's own persisted state alone
-  const [decksForce, setDecksForce] = useState<boolean | null>(null)
-  const [slidesForce, setSlidesForce] = useState<boolean | null>(null)
 
-  const selected = decks.find((d) => d.id === selectedId) ?? null
-
-  const [preview, setPreview] = useState<PreviewInfo | null>(null)
-  const [previewError, setPreviewError] = useState<string | null>(null)
-  const [current, setCurrent] = useState(0)
-
-  // Start a preview server for the selected deck; stop the previous one.
-  useEffect(() => {
-    if (!selected) {
-      setPreview(null)
-      return
-    }
-    let alive = true
-    const path = selected.path
-    setPreview(null)
-    setPreviewError(null)
-    setCurrent(0)
-    client
-      .previewStart(path)
-      .then((info) => alive && setPreview(info))
-      .catch((e) => alive && setPreviewError(e instanceof ApiError ? e.code : 'request_failed'))
-    return () => {
-      alive = false
-      void client.previewStop(path).catch(() => undefined)
-    }
-  }, [client, selected?.path]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // --- build state
-  const [buildInfo, setBuildInfo] = useState<BuildInfo | null>(null)
-  const [building, setBuilding] = useState(false)
-  const [buildResult, setBuildResult] = useState<BuildResult | null>(null)
-  const [pendingCommand, setPendingCommand] = useState<string | null>(null)
-  // Decks whose undeclared build script the user chose not to adopt (kept across reloads).
-  const [scriptIgnored, setScriptIgnored] = useState<string[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem('hs.scriptIgnored') || '[]') as string[]
-    } catch {
-      return []
-    }
+  const notes = useNotes(selected?.path)
+  const { preview, setPreview, previewError, setPreviewError, current, setCurrent, reloadKey, bumpReload, viewMode, setViewMode, draftsRef, outputFrameRef, syncDeck } = usePreview({
+    client,
+    selected,
+    setDecks,
+    onExternalChange: notes.invalidate,
   })
-  useEffect(() => localStorage.setItem('hs.scriptIgnored', JSON.stringify(scriptIgnored)), [scriptIgnored])
-  const [reloadKey, setReloadKey] = useState(0)
-  const [viewMode, setViewMode] = useState<'slides' | 'output' | 'code'>('slides')
-  // Code editor drafts (unsaved text per slide), kept across slide and view switches.
-  const draftsRef = useRef<Drafts>(new Map())
-  // Output view: the frame follows `current` through its hash (src={url#N}); the
-  // built-in runtime also reports its own navigation back, so the strip follows.
-  const outputFrameRef = useRef<HTMLIFrameElement>(null)
-  useEffect(() => {
-    const onMsg = (e: MessageEvent) => {
-      const m = e.data as { type?: string; index?: number } | null
-      if (!m || m.type !== 'hs-slide' || typeof m.index !== 'number') return
-      if (e.source === outputFrameRef.current?.contentWindow) setCurrent(m.index)
-    }
-    window.addEventListener('message', onMsg)
-    return () => window.removeEventListener('message', onMsg)
-  }, [])
 
-  useEffect(() => {
-    setBuildResult(null)
-    setPendingCommand(null)
-    setViewMode('slides')
-    if (!selected) {
-      setBuildInfo(null)
-      return
-    }
-    let alive = true
-    client
-      .buildInfo(selected.path)
-      .then((i) => alive && setBuildInfo(i))
-      .catch((e) => {
-        console.warn('[html-studio] build/info failed', e)
-        alive && setBuildInfo(null)
-      })
-    return () => {
-      alive = false
-    }
-  }, [client, selected?.path]) // eslint-disable-line react-hooks/exhaustive-deps
+  const build = useBuild({ client, selected, preview, t, setViewMode, setCurrent, bumpReload })
+  const { buildInfo, building, buildResult, pendingCommand, runBuild, showRebuild, outputUrl, canBuild, buildHint } = build
 
-  /**
-   * Resolve a build answer to its result. A built-in build answers at once; an
-   * external command answers a job id (its script may outlast the 30s the
-   * dashboard proxy gives one request), which is polled here until it ends.
-   */
-  const awaitBuild = useCallback(
-    async (res: Rebuild | undefined): Promise<BuildResult | null> => {
-      if (!res || !('ok' in res || 'job' in res)) return null
-      if ('ok' in res) return res
-      for (;;) {
-        await new Promise((r) => setTimeout(r, 1000))
-        const st = await client.buildStatus(res.job)
-        if (st.state === 'done' && st.result) return st.result
-        if (st.state === 'error') return { ok: false, mode: 'external', stderr: st.detail || st.error || 'build_failed' }
-      }
-    },
-    [client],
-  )
+  const chat = useDeckChat({ api, selected, preview, buildInfo, current, locale, t, bumpReload, bumpNotes: notes.bump })
+  const pins = usePins({ client, selected, preview, current, locale, setCurrent, setViewMode, bumpReload, postToChat: chat.post, bumpChat: chat.bumpChat })
+  const { selectMode, setSelectMode, activePin, setViewerFrame } = pins
+  const check = useCheck({ client, selected, preview, t, setPins: pins.setPins, pinnedIssues: pins.pinnedIssues })
+  const { checkJob, checkResult, checkError } = check
 
-  /** After an edit route reports a rebuild: show its result once it is known. */
-  const showRebuild = useCallback(
-    (rebuild: Rebuild | undefined, path: string) => {
-      if (!rebuild || 'skipped' in rebuild) return
-      if ('job' in rebuild) setBuilding(true)
-      void awaitBuild(rebuild)
-        .then((r) => {
-          if (!r) return
-          setBuildResult(r)
-          if (r.ok) setReloadKey((k) => k + 1)
-          void client.buildInfo(path).then(setBuildInfo).catch(() => undefined)
-        })
-        .finally(() => setBuilding(false))
-    },
-    [awaitBuild, client],
-  )
+  const arrange = useArrange({ client, selected, preview, current, setPreview, setDecks, setCurrent, bumpReload, invalidateNotes: notes.invalidate, showRebuild })
+  const { arrangeBusy, arrangeError, archived, archiveOpen, setArchiveOpen, arrangeActions, picker, setPicker } = arrange
 
-  const runBuild = useCallback(
-    async (trust = false) => {
-      if (!selected) return
-      setBuilding(true)
-      setPendingCommand(null)
-      try {
-        const first = await client.build(selected.path, trust)
-        if ('ok' in first && first.needsTrust && first.command) {
-          setPendingCommand(first.command)
-          return
-        }
-        const res = (await awaitBuild(first)) as BuildResult
-        setBuildResult(res)
-        if (res.ok) setTimeout(() => setBuildResult((cur) => (cur === res ? null : cur)), 8000)
-        setReloadKey((k) => k + 1)
-        const info = await client.buildInfo(selected.path)
-        setBuildInfo(info)
-        if (res.ok && res.output) setViewMode('output')
-      } catch (e) {
-        setBuildResult({ ok: false, mode: 'external', stderr: e instanceof ApiError ? e.code : 'request_failed' })
-      } finally {
-        setBuilding(false)
-      }
-    },
-    [client, selected, awaitBuild],
-  )
+  const theme = useTheme({ client, selected, setPreview, setPreviewError, bumpReload })
+  const { designInfo, tweakOpen, setTweakOpen } = theme
+  const { pdf, pdfError, exportPdf, dismiss: pdfDismiss } = usePdf(client, selected)
 
-  const openIssue = (file: string) => {
-    if (!preview) return
-    const idx = preview.slides.indexOf(file)
-    if (idx >= 0) {
-      setViewMode('slides')
-      setCurrent(idx)
-    }
-  }
-
-  const outputUrl = preview && buildInfo?.outputExists ? `${preview.baseUrl}/${buildInfo.output}` : null
-
-  // --- present / pdf
-  const [pdf, setPdf] = useState<PdfJob | null>(null)
-  const [pdfError, setPdfError] = useState<string | null>(null)
-
-  // P2-1: select-to-edit. The viewer frame runs the overlay (backend/inject/select.js)
-  // and reports clicks; pins live here (persisted per deck) and are pushed back
-  // to the frame so it can draw and re-anchor the markers.
-  const [selectMode, setSelectMode] = useState(false)
-  // P3-7: tweak panel (theme variables, live preview, apply to tokens.css).
-  const [tweakOpen, setTweakOpen] = useState(false)
-  const [pins, setPins] = useState<Pin[]>([])
-  const [activePin, setActivePin] = useState<string | null>(null)
-  const viewerFrame = useRef<HTMLIFrameElement | null>(null)
-  const setViewerFrame = useCallback((el: HTMLIFrameElement | null) => {
-    viewerFrame.current = el
-  }, [])
-  useEffect(() => {
-    setSelectMode(false)
-    setActivePin(null)
-    setPins(selected ? loadPins(selected.path) : [])
-  }, [selected?.path]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    if (selected) savePins(selected.path, pins)
-  }, [pins, selected?.path]) // eslint-disable-line react-hooks/exhaustive-deps
-  const pushPins = useCallback(() => {
-    const w = viewerFrame.current?.contentWindow
-    if (!w) return
-    const forSlide = pins
-      .filter((p) => p.slideIndex === current)
-      .map((p) => ({ id: p.id, index: p.index, status: p.status, cid: p.cid, selector: p.selector, rect: p.rect, comment: p.comment }))
-    w.postMessage({ type: 'hs-pins', pins: forSlide }, '*')
-  }, [pins, current])
-  useEffect(() => {
-    if (selectMode) pushPins()
-  }, [pushPins, selectMode])
-  useEffect(() => {
-    const onMsg = (e: MessageEvent) => {
-      if (e.source !== viewerFrame.current?.contentWindow) return
-      const m = e.data as { type?: string } & Partial<Capture> & { pins?: { id: string; how: Pin['how'] }[] }
-      if (!m || typeof m.type !== 'string') return
-      if (m.type === 'hs-select-ready') {
-        pushPins()
-      } else if (m.type === 'hs-capture' && typeof m.selector === 'string' && preview) {
-        const cap = m as unknown as Capture
-        // Deck-relative source path the agent will open (single-file decks: the entry itself).
-        const name = preview.slides[cap.slideIndex] ?? String(cap.slideIndex + 1)
-        const slideFile = selected?.kind === 'single' ? selected.entry ?? name : `${selected?.slidesDir ?? 'slides'}/${name}`
-        setPins((prev) => {
-          const nextIndex = prev.reduce((max, p) => Math.max(max, p.index), 0) + 1
-          const pin = newPin(cap, slideFile, nextIndex)
-          setActivePin(pin.id)
-          return [...prev, pin]
-        })
-      } else if (m.type === 'hs-anchored' && Array.isArray(m.pins)) {
-        const how = new Map(m.pins.map((a) => [a.id, a.how]))
-        setPins((prev) => (prev.some((p) => how.has(p.id) && p.how !== how.get(p.id)) ? prev.map((p) => (how.has(p.id) ? { ...p, how: how.get(p.id) } : p)) : prev))
-      }
-    }
-    window.addEventListener('message', onMsg)
-    return () => window.removeEventListener('message', onMsg)
-  }, [preview, pushPins, selected?.kind, selected?.entry, selected?.slidesDir]) // eslint-disable-line react-hooks/exhaustive-deps
-  const updatePinComment = useCallback((id: string, comment: string) => setPins((prev) => prev.map((p) => (p.id === id ? { ...p, comment } : p))), [])
-  const removePin = useCallback((id: string) => setPins((prev) => prev.filter((p) => p.id !== id)), [])
-  const jumpToPin = useCallback((slideIndex: number, id: string) => {
-    setCurrent(slideIndex)
-    setActivePin(id)
-    setViewMode('slides')
-  }, [])
-
-  // P2-3: send pins to the deck's chat session as one batch, then follow the
-  // agent's per-pin reports (report.py → queue) until every pin is done.
-  const [sending, setSending] = useState(false)
-  const [chatRefresh, setChatRefresh] = useState(0)
-  const [sendError, setSendError] = useState<string | null>(null)
-  const sendPins = useCallback(async () => {
-    if (!selected || sending) return
-    const drafts = pins.filter((p) => p.status === 'new' && p.comment.trim())
-    if (!drafts.length) return
-    setSending(true)
-    setSendError(null)
-    try {
-      const batch = await client.pinsSend(selected.path, drafts, locale)
-      const { key } = await openDeckChat(api, { deck: selected, preview, build: buildInfo, language: locale }, t('chat.title', { name: selected.name }))
-      await api.post('/api/chat?ws=1', { message: batch.prompt, slot: key, agent: '' })
-      const cidByPin = new Map(batch.comments.map((c) => [c.pinId, c.cid]))
-      setPins((prev) => prev.map((p) => (cidByPin.has(p.id) ? { ...p, status: 'sent', batchId: batch.id, batchCid: cidByPin.get(p.id), thread: [] } : p)))
-      setChatRefresh((k) => k + 1) // the deck chat pane may have looked up before the session existed
-    } catch (e) {
-      setSendError(e instanceof ApiError ? e.code : e instanceof Error ? e.message : 'request_failed')
-    } finally {
-      setSending(false)
-    }
-  }, [api, client, selected, pins, sending, locale, preview, buildInfo, t]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Poll the queue while any pin is out with the agent; a finished batch reloads the preview.
-  const outstanding = pins.some((p) => p.status === 'sent')
-  useEffect(() => {
-    if (!selected || !outstanding) return
-    let alive = true
-    const tick = async () => {
-      try {
-        const { batches } = await client.pinsQueue(selected.path)
-        if (!alive) return
-        const byCid = new Map(batches.flatMap((b) => b.comments.map((c) => [c.cid, { c, state: b.state }] as const)))
-        let completed = false
-        setPins((prev) => {
-          let changed = false
-          const next = prev.map((p) => {
-            const hit = p.batchCid ? byCid.get(p.batchCid) : undefined
-            if (!hit || hit.c.status === p.status) return p
-            changed = true
-            if (hit.c.status === 'done' || hit.c.status === 'question') completed = completed || hit.state === 'done'
-            return { ...p, status: hit.c.status, thread: hit.c.thread }
-          })
-          return changed ? next : prev
-        })
-        if (completed) setReloadKey((k) => k + 1)
-      } catch (e) {
-        console.warn('[html-studio] pins/queue failed', e)
-      }
-    }
-    void tick()
-    const id = setInterval(tick, 3000)
-    return () => {
-      alive = false
-      clearInterval(id)
-    }
-  }, [client, selected?.path, outstanding]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const replyToPin = useCallback(
-    async (id: string, text: string) => {
-      const pin = pins.find((p) => p.id === id)
-      if (!selected || !pin?.batchCid || !pin.batchId) return
-      try {
-        await client.pinsReply(selected.path, pin.batchId, pin.batchCid, text)
-        const { key } = await openDeckChat(api, { deck: selected, preview, build: buildInfo, language: locale }, t('chat.title', { name: selected.name }))
-        const msg = `Re pin [${pin.batchCid}] (${pin.slideFile} > ${pin.selector}): ${text}\nContinue with that comment and report again with report.py (--cid ${pin.batchCid}).`
-        await api.post('/api/chat?ws=1', { message: msg, slot: key, agent: '' })
-        setPins((prev) => prev.map((p) => (p.id === id ? { ...p, status: 'sent', thread: [...(p.thread ?? []), { role: 'user', text, ts: Date.now() }] } : p)))
-      } catch (e) {
-        setSendError(e instanceof ApiError ? e.code : e instanceof Error ? e.message : 'request_failed')
-      }
-    },
-    [api, client, selected, pins, preview, buildInfo, locale, t],
-  )
-  const dismissDone = useCallback(() => {
-    const doneBatches = new Set(pins.filter((p) => p.status === 'done' && p.batchId).map((p) => p.batchId as string))
-    setPins((prev) => prev.filter((p) => p.status !== 'done'))
-    // Batch files whose every pin is gone from the panel can be removed.
-    if (selected) {
-      for (const b of doneBatches) {
-        if (!pins.some((p) => p.batchId === b && p.status !== 'done')) void client.pinsDismiss(selected.path, b).catch(() => undefined)
-      }
-    }
-  }, [pins, selected, client])
-
-  // P2-5: deck check. One headless run over the deck; each issue can become a pin.
-  const [checkJob, setCheckJob] = useState<CheckJob | null>(null)
-  const [checkResult, setCheckResult] = useState<CheckResult | null>(null)
-  const [checkError, setCheckError] = useState<string | null>(null)
-  useEffect(() => {
-    setCheckJob(null)
-    setCheckResult(null)
-    setCheckError(null)
-  }, [selected?.path])
-  const runCheck = useCallback(async () => {
-    if (!selected || checkJob?.state === 'running') return
-    setCheckError(null)
-    setCheckResult(null)
-    try {
-      const job = await client.checkStart(selected.path)
-      setCheckJob(job)
-    } catch (e) {
-      setCheckError(e instanceof ApiError ? e.code : 'request_failed')
-    }
-  }, [client, selected, checkJob?.state])
-  useEffect(() => {
-    if (!checkJob || checkJob.state !== 'running') return
-    let alive = true
-    const id = setInterval(async () => {
-      try {
-        const st = await client.checkStatus(checkJob.id)
-        if (!alive) return
-        if (st.state === 'running') return
-        setCheckJob(st)
-        if (st.state === 'done' && st.result) setCheckResult(st.result)
-        else setCheckError(st.error ?? 'check_failed')
-      } catch (e) {
-        if (!alive) return
-        setCheckJob(null)
-        setCheckError(e instanceof ApiError ? e.code : 'request_failed')
-      }
-    }, 700)
-    return () => {
-      alive = false
-      clearInterval(id)
-    }
-  }, [client, checkJob?.id, checkJob?.state]) // eslint-disable-line react-hooks/exhaustive-deps
-  const pinnedIssues = useMemo(() => new Set(pins.map((p) => p.issueKey).filter((k): k is string => !!k)), [pins])
-  const fixIssue = useCallback(
-    (issue: CheckIssue) => {
-      if (!preview) return
-      const key = issueKey(issue)
-      const name = preview.slides[issue.slideIndex] ?? String(issue.slideIndex + 1)
-      const slideFile = selected?.kind === 'single' ? selected.entry ?? name : `${selected?.slidesDir ?? 'slides'}/${name}`
-      const cap: Capture = {
-        slideIndex: issue.slideIndex,
-        cid: null,
-        selector: issue.selector,
-        tag: issue.tag,
-        elementId: null,
-        classes: issue.classes,
-        text: issue.text,
-        rect: issue.rect ?? { x: 0, y: 0, w: 0, h: 0 },
-        src: issue.src ?? null,
-      }
-      const commentKey = `check.fixcomment.${issue.rule}`
-      const base = t(commentKey) === commentKey ? t(`check.rule.${issue.rule}`) : t(commentKey)
-      setPins((prev) => {
-        if (prev.some((p) => p.issueKey === key)) return prev
-        const nextIndex = prev.reduce((max, p) => Math.max(max, p.index), 0) + 1
-        const pin = newPin(cap, slideFile, nextIndex)
-        return [...prev, { ...pin, comment: issue.detail ? `${base} (${issue.detail})` : base, issueKey: key }]
-      })
-    },
-    [preview, selected?.kind, selected?.entry, selected?.slidesDir, t],
-  )
-  const fixAllIssues = useCallback(() => {
-    if (!checkResult) return
-    for (const i of checkResult.issues) if (!pinnedIssues.has(issueKey(i))) fixIssue(i)
-  }, [checkResult, pinnedIssues, fixIssue])
-
-  // The deck's chat lives in the pane under the preview (DeckChat); collapsed until wanted.
-  const [chatOpen, setChatOpen] = useCollapsed('chat', false)
-
-  // P2-6: quick actions about the current slide, sent to the deck chat.
-  const runQuickAction = useCallback(
-    async (id: QuickActionId) => {
-      if (!selected || !preview) return
-      const name = preview.slides[current] ?? String(current + 1)
-      const slideFile = selected.kind === 'single' ? selected.entry ?? name : `${selected.slidesDir}/${name}`
-      const notesFile = `notes/${name.replace(/\.html?$/i, '').replace(/#/g, '-')}.md`
-      const prompt = quickActionPrompt(id, {
-        slideFile,
-        slideNumber: current + 1,
-        slideCount: preview.slides.length,
-        notesFile,
-        language: locale,
-        hasDesignMd: selected.hasDesignMd,
-      })
-      const { key } = await openDeckChat(api, { deck: selected, preview, build: buildInfo, language: locale }, t('chat.title', { name: selected.name }))
-      await api.post('/api/chat?ws=1', { message: prompt, slot: key, agent: '' })
-      setChatRefresh((k) => k + 1)
-      setChatOpen(true)
-      // Actions that edit files: refresh the preview after a moment so the change shows.
-      if (id === 'tighten' || id === 'draft-next') setTimeout(() => setReloadKey((k) => k + 1), 8000)
-      if (id === 'notes') setTimeout(() => setNotesRefresh((k) => k + 1), 8000)
-    },
-    [api, selected, preview, current, locale, buildInfo, t, setChatOpen],
-  )
-
-  // The deck list re-scans by itself (a deck folder created elsewhere shows up
-  // without a button), quietly: no loading state, errors ignored.
-  useEffect(() => {
-    if (conn !== 'connected') return
-    const id = setInterval(() => {
-      if (document.visibilityState !== 'visible') return
-      void client
-        .decks()
-        .then((res) => {
-          setRoots(res.roots)
-          setDecks((cur) => (JSON.stringify(cur.map((d) => [d.id, d.slideCount, d.modifiedAt])) === JSON.stringify(res.decks.map((d) => [d.id, d.slideCount, d.modifiedAt])) ? cur : res.decks))
-        })
-        .catch(() => undefined)
-    }, 10000)
-    return () => clearInterval(id)
-  }, [client, conn])
-
-  // Watch the selected deck for changes made outside the studio (the agent
-  // writing slides, an editor saving): preview/start is idempotent and reports
-  // the slide list and the newest mtime, so a light poll keeps the strip and
-  // the viewer in step without a file watcher.
-  const syncDeck = useCallback(async () => {
-    if (!selected || !preview) return
-    try {
-      const p = await client.previewStart(selected.path)
-      const slidesChanged = p.slides.length !== preview.slides.length || p.slides.some((s, i) => s !== preview.slides[i])
-      const touched = p.modifiedAt !== undefined && preview.modifiedAt !== undefined && p.modifiedAt > preview.modifiedAt
-      if (slidesChanged || touched || p.css !== preview.css) {
-        setPreview(p)
-        setReloadKey((k) => k + 1)
-        setNotesIndex(null)
-        setNotesRefresh((k) => k + 1)
-        if (slidesChanged) {
-          setDecks((ds) => ds.map((d) => (d.id === selected.id ? { ...d, slideCount: p.slides.length, slides: p.slides } : d)))
-          setCurrent((c) => Math.min(c, Math.max(0, p.slides.length - 1)))
-        }
-      }
-    } catch {
-      /* preview restarting or backend away: the next tick tries again */
-    }
-  }, [client, selected, preview])
-  useEffect(() => {
-    if (!selected || !preview) return
-    const id = setInterval(() => {
-      if (document.visibilityState === 'visible') void syncDeck()
-    }, 2500)
-    return () => clearInterval(id)
-  }, [selected, preview, syncDeck])
-
-  // P3-5: speaker notes (notes/<slide>.md), edited under the preview.
-  const [notesOpen, setNotesOpen] = useCollapsed('notes', false)
-  const [notesIndex, setNotesIndex] = useState<NotesIndex | null>(null)
-  const [notesRefresh, setNotesRefresh] = useState(0)
-  useEffect(() => {
-    setNotesIndex(null)
-  }, [selected?.path])
-  const withNotes = useMemo(() => new Set(notesIndex?.withNotes ?? []), [notesIndex])
-
-  // P3-2: slide arrangement (reorder / add / duplicate / archive / restore).
-  // The backend renames files and answers with the new slide list; the preview
-  // keeps its server, only its slide list changes.
-  const [arrangeBusy, setArrangeBusy] = useState(false)
-  const [arrangeError, setArrangeError] = useState<string | null>(null)
-  const [archived, setArchived] = useState<ArchivedSlide[]>([])
-  const [archiveOpen, setArchiveOpen] = useState(false)
-  useEffect(() => {
-    setArchived([])
-    setArrangeError(null)
-    if (!selected) return
-    let alive = true
-    void client.slidesArchiveList(selected.path).then((r) => alive && setArchived(r.items)).catch(() => undefined)
-    return () => {
-      alive = false
-    }
-  }, [client, selected?.path]) // eslint-disable-line react-hooks/exhaustive-deps
-  const applyArranged = useCallback(
-    (res: Arranged, focus?: string) => {
-      setPreview((p) => (p ? { ...p, slides: res.slides } : p))
-      if (selected) setDecks((ds) => ds.map((d) => (d.id === selected.id ? { ...d, slideCount: res.slides.length } : d)))
-      setReloadKey((k) => k + 1)
-      setNotesRefresh((k) => k + 1)
-      setNotesIndex(null)
-      if (focus) {
-        const i = res.slides.indexOf(focus)
-        if (i >= 0) setCurrent(i)
-      } else setCurrent((c) => Math.min(c, Math.max(0, res.slides.length - 1)))
-      if (selected) showRebuild(res.rebuild, selected.path)
-      if (selected) void client.slidesArchiveList(selected.path).then((r) => setArchived(r.items)).catch(() => undefined)
-    },
-    [client, selected, showRebuild],
-  )
-  const runArrange = useCallback(
-    async (op: () => Promise<Arranged & { name?: string }>, focusFromName = true) => {
-      setArrangeBusy(true)
-      setArrangeError(null)
-      try {
-        const res = await op()
-        applyArranged(res, focusFromName ? res.name : undefined)
-      } catch (e) {
-        setArrangeError(e instanceof ApiError ? e.code : 'request_failed')
-      } finally {
-        setArrangeBusy(false)
-      }
-    },
-    [applyArranged],
-  )
-  // P3-3: layout picker (insert a template after a slide / save a slide as a template).
-  const [picker, setPicker] = useState<{ mode: 'insert' | 'save'; after: string | null; slide?: string } | null>(null)
-  useEffect(() => {
-    setPicker(null)
-  }, [selected?.path])
-  const arrangeActions = useMemo<ArrangeActions | undefined>(
-    () =>
-      selected
-        ? {
-            busy: arrangeBusy,
-            onAdd: (after) => setPicker({ mode: 'insert', after }),
-            onDuplicate: (slide) => void runArrange(() => client.slidesAdd(selected.path, slide, true)),
-            onSaveLayout: (slide) => setPicker({ mode: 'save', after: slide, slide }),
-            onReorder: (order) => {
-              const focus = preview?.slides[current]
-              const at = focus ? order.indexOf(focus) : -1
-              void runArrange(async () => {
-                const res = await client.slidesReorder(selected.path, order)
-                return { ...res, name: at >= 0 ? res.slides[at] : undefined }
-              })
-            },
-            onArchive: (slide) => void runArrange(() => client.slidesArchive(selected.path, slide), false),
-          }
-        : undefined,
-    [selected, arrangeBusy, preview, current, runArrange, client],
-  )
-
-  // P1-8: DESIGN.md recognition. Read-only until the user asks for tokens.css.
-  const [designInfo, setDesignInfo] = useState<DesignInfo | null>(null)
-  const [tokensBusy, setTokensBusy] = useState(false)
-  useEffect(() => {
-    if (!selected || !selected.hasDesignMd) {
-      setDesignInfo(null)
-      return
-    }
-    let alive = true
-    client
-      .design(selected.path)
-      .then((i) => alive && setDesignInfo(i))
-      .catch((e) => {
-        console.warn('[html-studio] design failed', e)
-        alive && setDesignInfo(null)
-      })
-    return () => {
-      alive = false
-    }
-  }, [client, selected?.path, selected?.hasDesignMd]) // eslint-disable-line react-hooks/exhaustive-deps
-  const writeTokens = useCallback(async () => {
-    if (!selected) return
-    setTokensBusy(true)
-    try {
-      const info = await client.writeTokens(selected.path)
-      setDesignInfo(info)
-      // The backend restarted the preview with the new stylesheet: pick up its port/css.
-      const p = await client.previewStart(selected.path)
-      setPreview(p)
-      setReloadKey((k) => k + 1)
-    } catch (e) {
-      setPreviewError(e instanceof ApiError ? e.code : 'request_failed')
-    } finally {
-      setTokensBusy(false)
-    }
-  }, [client, selected])
-
-  // P1-7: deck chat pane state is declared above (needed by the quick actions).
-  // Preview / chat split: share of the right column given to the chat (persisted).
-  const [chatRatio, setChatRatio] = useState<number>(() => {
-    try {
-      const v = Number(localStorage.getItem('hs.chatRatio'))
-      return v >= 0.15 && v <= 0.8 ? v : 0.4
-    } catch {
-      return 0.4
-    }
-  })
-  const rightColRef = useRef<HTMLDivElement>(null)
-  // Code view: share of the height given to the preview (above the editor), persisted.
-  const [codeRatio, setCodeRatio] = useState<number>(() => {
-    try {
-      const v = Number(localStorage.getItem('hs.codeRatio'))
-      return v >= 0.15 && v <= 0.75 ? v : 0.45
-    } catch {
-      return 0.45
-    }
-  })
-  const codeViewRef = useRef<HTMLDivElement>(null)
-  const onCodeSplitterDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    const box = codeViewRef.current
-    if (!box) return
-    e.preventDefault()
-    const handle = e.currentTarget
-    handle.setPointerCapture(e.pointerId)
-    const rect = box.getBoundingClientRect()
-    const move = (ev: PointerEvent) => setCodeRatio(Math.min(0.75, Math.max(0.15, (ev.clientY - rect.top) / rect.height)))
-    const up = () => {
-      handle.removeEventListener('pointermove', move)
-      handle.removeEventListener('pointerup', up)
-      handle.removeEventListener('pointercancel', up)
-      setCodeRatio((r) => {
-        try {
-          localStorage.setItem('hs.codeRatio', String(r))
-        } catch {
-          /* ignore */
-        }
-        return r
-      })
-    }
-    handle.addEventListener('pointermove', move)
-    handle.addEventListener('pointerup', up)
-    handle.addEventListener('pointercancel', up)
-  }, [])
-  const onSplitterDown = useCallback(
-    (e: React.PointerEvent<HTMLDivElement>) => {
-      const col = rightColRef.current
-      if (!col) return
-      e.preventDefault()
-      const handle = e.currentTarget
-      handle.setPointerCapture(e.pointerId)
-      const rect = col.getBoundingClientRect()
-      const move = (ev: PointerEvent) => {
-        const ratio = Math.min(0.8, Math.max(0.15, (rect.bottom - ev.clientY) / rect.height))
-        setChatRatio(ratio)
-      }
-      const up = () => {
-        handle.removeEventListener('pointermove', move)
-        handle.removeEventListener('pointerup', up)
-        handle.removeEventListener('pointercancel', up)
-        setChatRatio((r) => {
-          try {
-            localStorage.setItem('hs.chatRatio', String(r))
-          } catch {
-            /* ignore */
-          }
-          return r
-        })
-      }
-      handle.addEventListener('pointermove', move)
-      handle.addEventListener('pointerup', up)
-      handle.addEventListener('pointercancel', up)
-    },
-    [],
-  )
-  useEffect(() => {
-    setPdf(null)
-    setPdfError(null)
-  }, [selected?.path])
+  // Preview / chat split: share of the right column given to the chat. Code view: share of the height given to the preview.
+  const chatSplit = useSplitRatio<HTMLDivElement>({ key: 'hs.chatRatio', initial: 0.4, min: 0.15, max: 0.8, fromPointer: (ev, rect) => (rect.bottom - ev.clientY) / rect.height })
+  const codeSplit = useSplitRatio<HTMLDivElement>({ key: 'hs.codeRatio', initial: 0.45, min: 0.15, max: 0.75, fromPointer: (ev, rect) => (ev.clientY - rect.top) / rect.height })
+  const { ratio: chatRatio, boxRef: rightColRef, onPointerDown: onSplitterDown } = chatSplit
+  const { ratio: codeRatio, boxRef: codeViewRef, onPointerDown: onCodeSplitterDown } = codeSplit
+  const { headRef, headH } = useHeaderHeight()
 
   const [presenting, setPresenting] = useState(false)
   const present = useCallback(() => {
     if (!selected || !outputUrl) return
     setPresenting(true)
   }, [selected, outputUrl])
-  const exportPdf = useCallback(async () => {
-    if (!selected) return
-    setPdfError(null)
-    try {
-      let job = await client.pdfStart(selected.path)
-      setPdf(job)
-      while (job.state === 'running') {
-        await new Promise((r) => setTimeout(r, 1000))
-        job = await client.pdfStatus(job.id)
-        setPdf(job)
-      }
-      if (job.state === 'error') setPdfError(job.error ?? 'pdf_failed')
-    } catch (e) {
-      setPdf(null)
-      setPdfError(e instanceof ApiError ? e.code : 'request_failed')
-    }
-  }, [client, selected])
 
-  const canBuild = !!selected && !!preview && preview.slides.length > 0 && !building && (buildInfo?.buildable ?? false)
-  const buildHint = !selected
-    ? ''
-    : !buildInfo
-      ? t('build.hint.loading')
-      : !buildInfo.buildable
-        ? t('build.hint.single_file')
-        : buildInfo.builtin
-          ? t('build.mode.builtin')
-          : buildInfo.command ?? '' 
-
-  const refresh = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const res = await client.decks()
-      setRoots(res.roots)
-      setDecks(res.decks)
-    } catch (e) {
-      setError(e instanceof ApiError ? e.code : 'request_failed')
-    } finally {
-      setLoading(false)
-    }
-  }, [client])
-
-  // P3-4: new deck wizard. After creation the deck is selected; optionally the
-  // deck chat opens with the wizard's answers and asks for an outline.
+  // New deck wizard. After creation the deck is selected; optionally the deck
+  // chat opens with the wizard's answers and asks for an outline.
   const [newDeckOpen, setNewDeckOpen] = useState(false)
   const onDeckCreated = useCallback(
     async (deck: Deck, askOutline: boolean, answers: NewDeckRequest) => {
@@ -775,7 +99,6 @@ export default function HtmlStudio() {
       selectDeck(deck)
       if (!askOutline) return
       try {
-        const { key } = await openDeckChat(api, { deck, preview: null, build: null, language: locale }, t('chat.title', { name: deck.name }))
         const lang = locale.startsWith('ko') ? 'Korean' : 'English'
         const msg = [
           'This deck was just created with the new deck wizard. brief.md in the deck folder holds the same answers.',
@@ -789,138 +112,18 @@ export default function HtmlStudio() {
         ]
           .filter((l) => l !== '')
           .join('\n')
-        await api.post('/api/chat?ws=1', { message: msg, slot: key, agent: '' })
-        setChatOpen(true)
+        await chat.post(deck, msg, { preview: null, build: null })
+        chat.setChatOpen(true)
       } catch {
         /* the deck exists; the chat can be started from the pane */
       }
     },
-    [refresh, api, locale, t], // eslint-disable-line react-hooks/exhaustive-deps
+    [refresh, locale, chat], // eslint-disable-line react-hooks/exhaustive-deps
   )
-
-
-  // Connect to the backend. Right after the app is (re)enabled the backend is
-  // still starting, so the first /status can fail: keep retrying until it
-  // answers, and only then load the deck list. Nothing renders half-loaded.
-  useEffect(() => {
-    let alive = true
-    let timer: ReturnType<typeof setTimeout> | null = null
-    let attempt = 0
-    const connect = async () => {
-      if (!alive) return
-      try {
-        const res = await client.status()
-        if (!alive) return
-        setStatus(res)
-        setConn('connected')
-        await refresh()
-      } catch {
-        if (!alive) return
-        setConn(attempt === 0 ? 'connecting' : 'error')
-        attempt += 1
-        timer = setTimeout(connect, Math.min(1000 * attempt, 5000))
-      }
-    }
-    void connect()
-    const onFocus = () => {
-      if (timer) {
-        clearTimeout(timer)
-        timer = null
-        void connect()
-      }
-    }
-    window.addEventListener('focus', onFocus)
-    return () => {
-      alive = false
-      if (timer) clearTimeout(timer)
-      window.removeEventListener('focus', onFocus)
-    }
-  }, [client, refresh])
-
-  const addRoot = useCallback(
-    async (path?: string) => {
-      setError(null)
-      setErrorDetail(null)
-      setLoading(true)
-      try {
-        if (path) {
-          const res = await client.addRoot(path)
-          setRoots(res.roots)
-        } else {
-          // The OS dialog may stay open far longer than the gateway proxy allows
-          // a single request to take, so start it and poll for the outcome.
-          const start = await client.pickStart()
-          let st = start
-          while (st.state === 'pending') {
-            await new Promise((r) => setTimeout(r, 700))
-            st = await client.pickStatus(start.id)
-          }
-          if (st.state === 'cancelled') return
-          if (st.state === 'error') throw new ApiError(st.error ?? 'folder_chooser_failed', st.detail)
-          setRoots(st.roots ?? [])
-        }
-      } catch (e) {
-        setError(e instanceof ApiError ? e.code : 'request_failed')
-        setErrorDetail(e instanceof ApiError ? e.message : String(e))
-        return
-      } finally {
-        setLoading(false)
-      }
-      await refresh()
-    },
-    [client, refresh],
-  )
-
-  const removeRoot = useCallback(
-    async (path: string) => {
-      setError(null)
-      setLoading(true)
-      try {
-        const res = await client.removeRoot(path)
-        setRoots(res.roots)
-        setDecks((prev) => prev.filter((d) => d.root !== path))
-        if (selected && selected.root === path) setSelectedId(null)
-      } catch (e) {
-        setError(e instanceof ApiError ? e.code : 'request_failed')
-        return
-      } finally {
-        setLoading(false)
-      }
-      await refresh()
-    },
-    [client, refresh, selected],
-  )
-
-  const selectDeck = (deck: Deck) => {
-    setSelectedId(deck.id)
-    // Selecting a deck hands the sidebar over to its slides.
-    setDecksForce(false)
-    setSlidesForce(true)
-    // Release the override so the user can toggle freely afterwards.
-    setTimeout(() => {
-      setDecksForce(null)
-      setSlidesForce(null)
-    }, 0)
-  }
 
   const statusText =
     conn === 'connecting' ? t('status.connecting') : conn === 'connected' ? t('status.connected') : t('status.error')
-
   const gridCols = sidebarOpen ? 'minmax(200px, 1fr) minmax(320px, 4fr)' : '36px minmax(320px, 4fr)'
-
-  // The host may or may not give this page a bounded height. Measure the header
-  // block ourselves and size the grid from the viewport so every pane has a real
-  // height limit and scrolls internally instead of growing the page.
-  const headRef = useRef<HTMLDivElement>(null)
-  const [headH, setHeadH] = useState(0)
-  useEffect(() => {
-    const el = headRef.current
-    if (!el) return
-    const ro = new ResizeObserver(() => setHeadH(el.getBoundingClientRect().bottom))
-    ro.observe(el)
-    setHeadH(el.getBoundingClientRect().bottom)
-    return () => ro.disconnect()
-  }, [])
 
   return (
     <div className="flex flex-col min-h-0" lang={locale}>
@@ -1024,7 +227,7 @@ export default function HtmlStudio() {
                 preview ? (
                   preview.slides.length ? (
                     <>
-                      <SlideStrip t={t} preview={preview} current={current} onSelect={setCurrent} reloadKey={reloadKey} withNotes={withNotes} notesLabel={t('strip.has_notes')} arrange={arrangeActions} />
+                      <SlideStrip t={t} preview={preview} current={current} onSelect={setCurrent} reloadKey={reloadKey} withNotes={notes.withNotes} notesLabel={t('strip.has_notes')} arrange={arrangeActions} />
                       {arrangeError && (
                         <p className="m-0 mt-2 text-[12px]" role="alert" style={{ color: 'var(--danger)' }}>
                           {t('error.generic', { code: arrangeError })}
@@ -1049,7 +252,7 @@ export default function HtmlStudio() {
                                   </span>
                                   <SmallBtn
                                     disabled={arrangeBusy}
-                                    onClick={() => void runArrange(() => client.slidesRestore(selected.path, a.name, preview.slides[current] ?? null))}
+                                    onClick={() => arrange.restore(a.name)}
                                     title={t('strip.restore_hint')}
                                   >
                                     {t('strip.restore')}
@@ -1142,7 +345,7 @@ export default function HtmlStudio() {
                 {t('toolbar.build')}
               </SmallBtn>
               <SmallBtn
-                onClick={() => void runCheck()}
+                onClick={() => void check.runCheck()}
                 disabled={!preview || checkJob?.state === 'running'}
                 title={t('check.hint')}
                 className="inline-flex items-center gap-1.5"
@@ -1185,7 +388,7 @@ export default function HtmlStudio() {
                   </SmallBtn>
                 </>
               )}
-              <SmallBtn className="ml-auto" onClick={() => { setPdf(null); setPdfError(null) }} aria-label={t('build.dismiss')}>✕</SmallBtn>
+              <SmallBtn className="ml-auto" onClick={pdfDismiss} aria-label={t('build.dismiss')}>✕</SmallBtn>
             </div>
           )}
           {selected && designInfo && <ThemeRow t={t} info={designInfo} onOpenTheme={() => setTweakOpen(true)} />}
@@ -1199,35 +402,23 @@ export default function HtmlStudio() {
             <CheckPanel
               t={t}
               result={checkResult}
-              pinned={pinnedIssues}
+              pinned={pins.pinnedIssues}
               onJump={(i) => {
                 setCurrent(i)
                 setViewMode('slides')
               }}
-              onFix={fixIssue}
-              onFixAll={fixAllIssues}
-              onClose={() => setCheckResult(null)}
+              onFix={check.fixIssue}
+              onFixAll={check.fixAllIssues}
+              onClose={() => check.setCheckResult(null)}
             />
           )}
-          {selected && buildInfo?.script && buildInfo.suggestedCommand && !buildInfo.command && !scriptIgnored.includes(selected.path) && (
+          {selected && build.scriptOffer && (
             <div className="mb-2 flex-none rounded-md border p-3 text-[13px] flex flex-wrap items-center gap-2" style={{ borderColor: 'var(--border)' }} role="status" data-testid="build-script-notice">
-              <span className="flex-1 min-w-0">{t('build.script.found', { script: buildInfo.script, command: buildInfo.suggestedCommand })}</span>
-              <SmallBtn
-                active
-                onClick={() => {
-                  const path = selected.path
-                  void client
-                    .buildAdopt(path)
-                    .then((info) => {
-                      setBuildInfo(info)
-                      return runBuild(false)
-                    })
-                    .catch(() => undefined)
-                }}
-              >
-                {t('build.script.use', { script: buildInfo.script })}
+              <span className="flex-1 min-w-0">{t('build.script.found', { script: build.scriptOffer.script, command: build.scriptOffer.command })}</span>
+              <SmallBtn active onClick={build.adoptScript}>
+                {t('build.script.use', { script: build.scriptOffer.script })}
               </SmallBtn>
-              <SmallBtn onClick={() => setScriptIgnored((v) => [...v, selected.path])}>{t('build.script.ignore')}</SmallBtn>
+              <SmallBtn onClick={build.ignoreScript}>{t('build.script.ignore')}</SmallBtn>
             </div>
           )}
           {selected && (buildResult || pendingCommand) && (
@@ -1237,9 +428,9 @@ export default function HtmlStudio() {
                 result={buildResult}
                 pendingCommand={pendingCommand}
                 onTrust={() => runBuild(true)}
-                onCancelTrust={() => setPendingCommand(null)}
-                onOpenIssue={openIssue}
-                onDismiss={() => setBuildResult(null)}
+                onCancelTrust={() => build.setPendingCommand(null)}
+                onOpenIssue={build.openIssue}
+                onDismiss={() => build.setBuildResult(null)}
               />
             </div>
           )}
@@ -1273,7 +464,7 @@ export default function HtmlStudio() {
                     drafts={draftsRef.current}
                     refreshKey={reloadKey}
                     onSaved={(res) => {
-                      setReloadKey((k) => k + 1)
+                      bumpReload()
                       showRebuild(res.rebuild, selected.path)
                     }}
                   />
@@ -1306,18 +497,18 @@ export default function HtmlStudio() {
                 <SlideViewer t={t} preview={preview} current={current} onChange={setCurrent} reloadKey={reloadKey} selectMode={selectMode} frameRef={setViewerFrame} />
                 <PinsPanel
                   t={t}
-                  pins={pins}
+                  pins={pins.pins}
                   current={current}
                   activeId={activePin}
-                  sending={sending}
-                  sendError={sendError}
-                  onComment={updatePinComment}
-                  onRemove={removePin}
-                  onJump={jumpToPin}
-                  onClearAll={() => setPins([])}
-                  onSend={() => void sendPins()}
-                  onReply={(id, text) => void replyToPin(id, text)}
-                  onDismissDone={dismissDone}
+                  sending={pins.sending}
+                  sendError={pins.sendError}
+                  onComment={pins.updatePinComment}
+                  onRemove={pins.removePin}
+                  onJump={pins.jumpToPin}
+                  onClearAll={() => pins.setPins([])}
+                  onSend={() => void pins.sendPins()}
+                  onReply={(id, text) => void pins.replyToPin(id, text)}
+                  onDismissDone={pins.dismissDone}
                 />
               </>
             )
@@ -1349,13 +540,11 @@ export default function HtmlStudio() {
                 client={client}
                 deckPath={selected.path}
                 design={designInfo}
-                tokensBusy={tokensBusy}
-                onWriteTokens={() => void writeTokens()}
-                onPreview={() => setReloadKey((k) => k + 1)}
+                tokensBusy={theme.tokensBusy}
+                onWriteTokens={() => void theme.writeTokens()}
+                onPreview={bumpReload}
                 onApplied={() => {
-                  setReloadKey((k) => k + 1)
-                  void client.previewStart(selected.path).then(setPreview).catch(() => undefined)
-                  void client.design(selected.path).then(setDesignInfo).catch(() => undefined)
+                  theme.onApplied()
                   void refresh()
                 }}
                 onClose={() => setTweakOpen(false)}
@@ -1379,16 +568,13 @@ export default function HtmlStudio() {
             deckPath={selected.path}
             busy={arrangeBusy}
             onClose={() => setPicker(null)}
-            onPick={(layoutId, after) => {
-              setPicker(null)
-              void runArrange(() => client.slidesAdd(selected.path, after, false, layoutId))
-            }}
+            onPick={arrange.insertLayout}
           />
         )}
 
         {/* Speaker notes for the current slide (P3-5) */}
         {selected && preview && preview.slides[current] && (
-          <div className="hs-right-notes min-h-0 flex flex-col" style={{ flex: notesOpen ? '0 0 22%' : '0 0 auto', marginTop: 12 }}>
+          <div className="hs-right-notes min-h-0 flex flex-col" style={{ flex: notes.notesOpen ? '0 0 22%' : '0 0 auto', marginTop: 12 }}>
             <Card>
               <NotesPanel
                 t={t}
@@ -1396,17 +582,17 @@ export default function HtmlStudio() {
                 deckPath={selected.path}
                 slide={preview.slides[current]}
                 slideNumber={current + 1}
-                open={notesOpen}
-                onToggle={() => setNotesOpen(!notesOpen)}
-                onChanged={setNotesIndex}
-                refreshKey={notesRefresh + reloadKey}
+                open={notes.notesOpen}
+                onToggle={() => notes.setNotesOpen(!notes.notesOpen)}
+                onChanged={notes.setNotesIndex}
+                refreshKey={notes.notesRefresh + reloadKey}
               />
             </Card>
           </div>
         )}
 
         {/* Splitter: drag to change the preview / chat share (hidden when the chat is collapsed) */}
-        {chatOpen ? (
+        {chat.chatOpen ? (
           <div
             role="separator"
             aria-orientation="horizontal"
@@ -1424,7 +610,7 @@ export default function HtmlStudio() {
         )}
 
         {/* Deck chat (under the preview) */}
-        <div className="hs-right-chat min-h-0 flex flex-col" style={{ flex: chatOpen ? `0 0 ${Math.round(chatRatio * 1000) / 10}%` : '0 0 auto' }}>
+        <div className="hs-right-chat min-h-0 flex flex-col" style={{ flex: chat.chatOpen ? `0 0 ${Math.round(chatRatio * 1000) / 10}%` : '0 0 auto' }}>
         <Card>
           <DeckChat
             t={t}
@@ -1432,10 +618,10 @@ export default function HtmlStudio() {
             deck={selected}
             preview={preview}
             build={buildInfo}
-            open={chatOpen}
-            onToggle={() => setChatOpen(!chatOpen)}
-            refreshKey={chatRefresh}
-            toolbar={preview ? <QuickChips t={t} slideNumber={current + 1} onRun={runQuickAction} /> : null}
+            open={chat.chatOpen}
+            onToggle={() => chat.setChatOpen(!chat.chatOpen)}
+            refreshKey={chat.chatRefresh}
+            toolbar={preview ? <QuickChips t={t} slideNumber={current + 1} onRun={chat.runQuickAction} /> : null}
           />
         </Card>
         </div>
