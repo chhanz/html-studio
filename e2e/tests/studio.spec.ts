@@ -945,3 +945,54 @@ test('layout library: pick a built-in layout rendered in the deck style, save a 
   await expect(dialog.getByTestId('layout-card')).toHaveCount(8)
   await dialog.getByRole('button', { name: 'Close' }).click()
 })
+
+test('new deck wizard creates a themed deck, selects it, asks the agent for an outline, and remembers defaults', async ({ page }) => {
+  await openApp(page)
+  await addFixtureRoot(page)
+  const home = await fakeHome(page)
+  await page.getByTestId('deck-new').click()
+  const dialog = page.getByRole('dialog', { name: 'New deck' })
+  await dialog.getByLabel('Title').fill('Acme Q4 Plan')
+  await expect(dialog.getByLabel('Deck folder name')).toHaveValue('acme-q4-plan')
+  await dialog.getByLabel('Presenter').fill('Jamie Lee')
+  await dialog.getByLabel('Purpose').fill('Agree the Q4 priorities')
+  await dialog.getByLabel('Audience').fill('Acme leadership')
+  await dialog.getByLabel('Source material').fill('- planning notes\n- last quarter deck')
+  await dialog.getByRole('radio', { name: /Colours and font/ }).check()
+  await dialog.locator('#nd-font').fill('Pretendard')
+  await dialog.getByRole('button', { name: 'Create deck' }).click()
+  await expect(dialog).toHaveCount(0)
+
+  // The deck is selected and shows the filled cover + agenda.
+  await expect(page.locator('#slides-body ol > li')).toHaveCount(2)
+  await expect(page.frameLocator('[data-testid="slide-stage"] iframe').locator('h1')).toHaveText('Acme Q4 Plan')
+  await expect(page.frameLocator('[data-testid="slide-stage"] iframe').locator('p.muted').first()).toHaveText('Acme leadership')
+  const deckPath = `${home}/decks/acme-q4-plan`
+  const studio = JSON.parse(await (await page.request.get(`/__ctl/read?path=${encodeURIComponent(deckPath + '/studio.json')}`)).text())
+  expect(studio).toMatchObject({ slidesDir: 'slides', css: 'tokens.css', title: 'Acme Q4 Plan', presenter: 'Jamie Lee' })
+  const brief = await (await page.request.get(`/__ctl/read?path=${encodeURIComponent(deckPath + '/brief.md')}`)).text()
+  expect(brief).toContain('## Source material\n\n- planning notes')
+  expect(await (await page.request.get(`/__ctl/read?path=${encodeURIComponent(deckPath + '/tokens.css')}`)).text()).toContain('--font-sans: Pretendard')
+
+  // The deck chat was started with the brief and the outline request.
+  type LogEntry = { body?: { message?: string } }
+  await expect.poll(async () => {
+    const ctl = await (await page.request.get('/__ctl/chat')).json()
+    return (ctl.log as LogEntry[]).filter((m) => m.body?.message).length
+  }).toBeGreaterThanOrEqual(2)
+  const ctl = await (await page.request.get('/__ctl/chat')).json()
+  const msgs = (ctl.log as LogEntry[]).filter((m) => m.body?.message).map((m) => m.body!.message!)
+  expect(msgs[0]).toContain('attached to an HTML slide deck')
+  expect(msgs[1]).toContain('Propose an outline')
+  expect(msgs[1]).toContain('Acme leadership')
+
+  // Defaults are remembered for the next deck; a duplicate folder is refused.
+  const decksHeader = page.getByRole('button', { name: /^▸?\s*(Decks|덱)/ }).first()
+  if ((await decksHeader.getAttribute('aria-expanded')) !== 'true') await decksHeader.click()
+  await page.getByTestId('deck-new').click()
+  await expect(dialog.getByLabel('Presenter')).toHaveValue('Jamie Lee')
+  await expect(dialog.getByRole('radio', { name: /Colours and font/ })).toBeChecked()
+  await dialog.getByLabel('Title').fill('Acme Q4 Plan')
+  await dialog.getByRole('button', { name: 'Create deck' }).click()
+  await expect(dialog.getByRole('alert')).toContainText('already exists')
+})

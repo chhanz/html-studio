@@ -20,6 +20,8 @@ type Props = {
   onAddRoot: (path?: string) => Promise<void>
   onRemoveRoot: (path: string) => Promise<void>
   onRefresh: () => Promise<void>
+  /** Open the new deck wizard (needs at least one root). */
+  onNew?: () => void
 }
 
 function shortPath(p: string): string {
@@ -93,6 +95,11 @@ export function DeckPanel(p: Props) {
           {p.loading && !busy && <Spinner />}
           {t('roots.refresh')}
         </SmallBtn>
+        {p.onNew && (
+          <SmallBtn onClick={p.onNew} disabled={busy || !p.connected || !p.roots.length} active title={p.roots.length ? undefined : t('newdeck.needs_root')} data-testid="deck-new">
+            {t('newdeck.button')}
+          </SmallBtn>
+        )}
       </div>
       {typing && (
         <form

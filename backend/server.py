@@ -38,6 +38,7 @@ import check as check_lib  # noqa: E402
 import source as source_lib  # noqa: E402
 import arrange as arrange_lib  # noqa: E402
 import layouts as layouts_lib  # noqa: E402
+import newdeck as newdeck_lib  # noqa: E402
 import notes as notes_lib  # noqa: E402
 import export as export_lib  # noqa: E402
 
@@ -47,7 +48,7 @@ CHECK_JOBS = check_lib.CheckJobs()
 PREVIEWS = preview_lib.PreviewRegistry()
 
 APP_NAME = os.environ.get("KIROCREW_APP_NAME", "html-studio")
-APP_VERSION = "0.1.25"
+APP_VERSION = "0.1.26"
 PORT = int(os.environ.get("PORT", "9100"))
 HOME = Path(os.environ.get("KIROCREW_HOME", str(Path.home() / ".kiro" / "crew")))
 DATA_DIR = HOME / "apps" / APP_NAME / "data"
@@ -546,6 +547,39 @@ def route_slides_add(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
     return _arrange(body, lambda deck, info: {"name": arrange_lib.add(deck, info["slidesDir"], info.get("entry"), after, bool(body.get("duplicate")), content, stem)})
 
 
+# --- new deck wizard --------------------------------------------------------
+def route_decks_new(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
+    """POST /decks/new {root, folder, title, presenter?, purpose?, audience?, sources?, theme?}.
+
+    ``root`` must be a registered root; ``theme`` is {kind: default} |
+    {kind: design, accent, bg, fg, font?} | {kind: copy, from: <deck path>}.
+    Answers the new deck's description (as /decks lists it).
+    """
+    root_raw = str(body.get("root", ""))
+    roots = [Path(r).resolve() for r in deck_lib.list_roots(DATA_DIR)]
+    try:
+        root = Path(root_raw).resolve()
+    except (OSError, RuntimeError):
+        return 400, {"error": "root_not_registered"}
+    if root not in roots or not root.is_dir():
+        return 400, {"error": "root_not_registered"}
+    theme = body.get("theme") if isinstance(body.get("theme"), dict) else {"kind": "default"}
+    copy_from = None
+    if theme.get("kind") == "copy":
+        copy_from = _deck_under_roots(str(theme.get("from", "")))
+        if copy_from is None:
+            return 400, {"error": "bad_theme_source"}
+    try:
+        deck = newdeck_lib.create_deck(root, str(body.get("folder", "")), body, theme, copy_from)
+    except newdeck_lib.NewDeckError as exc:
+        code = 409 if exc.code == "exists" else 400
+        return code, {"error": exc.code}
+    except OSError as exc:
+        return 500, {"error": "write_failed", "detail": str(exc)}
+    _log(f"new deck created at {deck}")
+    return 200, {"deck": deck_lib.describe_deck(deck, root)}
+
+
 # --- layout library ---------------------------------------------------------
 def route_layouts_list(_h: "Handler", _body: dict[str, Any]) -> tuple[int, Any]:
     """GET /layouts: built-in layouts, then the user's own."""
@@ -827,6 +861,7 @@ ROUTES: dict[tuple[str, str], Route] = {
     ("POST", "/slides/archive"): route_slides_archive,
     ("POST", "/slides/restore"): route_slides_restore,
     ("GET", "/slides/archive"): route_slides_archive_list,
+    ("POST", "/decks/new"): route_decks_new,
     ("GET", "/layouts"): route_layouts_list,
     ("POST", "/layouts"): route_layouts_save,
     ("POST", "/layouts/delete"): route_layouts_delete,

@@ -107,7 +107,7 @@ class ServerTest(unittest.TestCase):
         code, data = self.request("GET", "/api/status", signed=True)
         self.assertEqual(code, 200)
         self.assertEqual(data["app"], "html-studio")
-        self.assertEqual(data["version"], "0.1.25")
+        self.assertEqual(data["version"], "0.1.26")
         self.assertTrue(data["dataDir"].startswith(self.tmp.name))
 
     def test_signed_unknown_route_is_404(self) -> None:
@@ -373,6 +373,27 @@ class ServerTest(unittest.TestCase):
             self.assertEqual((code, data["error"]), (404, "unknown_layout"))
             # This test runs before test_roots_and_decks_flow (alphabetical), which expects no roots.
             self.request("POST", "/api/preview/stop", signed=True, body=json.dumps({"path": str(deck)}).encode())
+            self.request("POST", "/api/roots/remove", signed=True, body=json.dumps({"path": root}).encode())
+
+    def test_decks_new_route(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.home()) as root:
+            body = {"root": root, "folder": "wizard-deck", "title": "Wizard deck", "presenter": "Sam", "purpose": "Try the wizard", "audience": "Team", "sources": "none", "theme": {"kind": "default"}}
+            code, data = self.request("POST", "/api/decks/new", signed=True, body=json.dumps(body).encode())
+            self.assertEqual((code, data["error"]), (400, "root_not_registered"))
+            self.request("POST", "/api/roots/add", signed=True, body=json.dumps({"path": root}).encode())
+            code, data = self.request("POST", "/api/decks/new", signed=True, body=json.dumps(body).encode())
+            self.assertEqual((code, data["deck"]["name"], data["deck"]["slideCount"]), (200, "wizard-deck", 2))
+            self.assertTrue((Path(root) / "wizard-deck" / "brief.md").is_file())
+            code, data = self.request("POST", "/api/decks/new", signed=True, body=json.dumps(body).encode())
+            self.assertEqual((code, data["error"]), (409, "exists"))
+            code, data = self.request("POST", "/api/decks/new", signed=True, body=json.dumps({**body, "folder": "../escape"}).encode())
+            self.assertEqual((code, data["error"]), (400, "bad_folder"))
+            code, data = self.request("POST", "/api/decks/new", signed=True, body=json.dumps({**body, "folder": "no-title", "title": ""}).encode())
+            self.assertEqual((code, data["error"]), (400, "missing_title"))
+            code, data = self.request("POST", "/api/decks/new", signed=True, body=json.dumps({**body, "folder": "copy-deck", "theme": {"kind": "copy", "from": "/etc"}}).encode())
+            self.assertEqual((code, data["error"]), (400, "bad_theme_source"))
+            code, data = self.request("GET", "/api/decks", signed=True)
+            self.assertIn("wizard-deck", [d["name"] for d in data["decks"]])
             self.request("POST", "/api/roots/remove", signed=True, body=json.dumps({"path": root}).encode())
 
     def test_notes_round_trip_and_orphans(self) -> None:

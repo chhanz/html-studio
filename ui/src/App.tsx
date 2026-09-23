@@ -1,7 +1,7 @@
 import { useAppApi } from '@kirocrew/app-sdk'
 import { Card, CardTitle, PageHeader } from '@kirocrew/app-sdk/ui'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ApiError, type BackendStatus, type BuildInfo, type BuildResult, type CheckIssue, type CheckJob, type CheckResult, type Deck, type DesignInfo, type NotesIndex, type PdfJob, type PreviewInfo, type Arranged, type ArchivedSlide, makeClient } from './api'
+import { ApiError, type BackendStatus, type BuildInfo, type BuildResult, type CheckIssue, type CheckJob, type CheckResult, type Deck, type DesignInfo, type NotesIndex, type PdfJob, type PreviewInfo, type Arranged, type ArchivedSlide, type NewDeckRequest, makeClient } from './api'
 import { openDeckChat } from './chat'
 import { BuildPanel } from './components/BuildPanel'
 import { CheckPanel, issueKey } from './components/CheckPanel'
@@ -15,6 +15,7 @@ import { QuickChips } from './components/QuickChips'
 import { Section, useCollapsed } from './components/Section'
 import { SlideStrip, type ArrangeActions } from './components/SlideStrip'
 import { LayoutPicker } from './components/LayoutPicker'
+import { NewDeckDialog } from './components/NewDeckDialog'
 import { SlideViewer } from './components/SlideViewer'
 import { SmallBtn } from './components/SmallBtn'
 import { ThemeRow } from './components/ThemeRow'
@@ -673,6 +674,40 @@ export default function HtmlStudio() {
     }
   }, [client])
 
+  // P3-4: new deck wizard. After creation the deck is selected; optionally the
+  // deck chat opens with the wizard's answers and asks for an outline.
+  const [newDeckOpen, setNewDeckOpen] = useState(false)
+  const onDeckCreated = useCallback(
+    async (deck: Deck, askOutline: boolean, answers: NewDeckRequest) => {
+      setNewDeckOpen(false)
+      await refresh()
+      selectDeck(deck)
+      if (!askOutline) return
+      try {
+        const { key } = await openDeckChat(api, { deck, preview: null, build: null, language: locale }, t('chat.title', { name: deck.name }))
+        const lang = locale.startsWith('ko') ? 'Korean' : 'English'
+        const msg = [
+          'This deck was just created with the new deck wizard. brief.md in the deck folder holds the same answers.',
+          `Title: ${answers.title}`,
+          answers.presenter ? `Presenter: ${answers.presenter}` : '',
+          answers.purpose ? `Purpose: ${answers.purpose}` : '',
+          answers.audience ? `Audience: ${answers.audience}` : '',
+          answers.sources ? `Source material:\n${answers.sources}` : '',
+          '',
+          `Propose an outline for this deck as a numbered list of slide titles with one line each on what the slide shows (answer in ${lang}). Do not create files yet; wait for my go-ahead.`,
+        ]
+          .filter((l) => l !== '')
+          .join('\n')
+        await api.post('/api/chat?ws=1', { message: msg, slot: key, agent: '' })
+        setChatOpen(true)
+      } catch {
+        /* the deck exists; the chat can be started from the pane */
+      }
+    },
+    [refresh, api, locale, t], // eslint-disable-line react-hooks/exhaustive-deps
+  )
+
+
   // Connect to the backend. Right after the app is (re)enabled the backend is
   // still starting, so the first /status can fail: keep retrying until it
   // answers, and only then load the deck list. Nothing renders half-loaded.
@@ -879,6 +914,7 @@ export default function HtmlStudio() {
                   onAddRoot={addRoot}
                   onRemoveRoot={removeRoot}
                   onRefresh={refresh}
+                  onNew={() => setNewDeckOpen(true)}
                 />
               </Section>
               <div className="my-2 border-t border-border flex-none" />
@@ -1191,6 +1227,7 @@ export default function HtmlStudio() {
         </Card>
         </div>
 
+        {newDeckOpen && <NewDeckDialog t={t} client={client} roots={roots} decks={decks} onCreated={(d, ask, a) => void onDeckCreated(d, ask, a)} onClose={() => setNewDeckOpen(false)} />}
         {picker && selected && preview && (
           <LayoutPicker
             t={t}
