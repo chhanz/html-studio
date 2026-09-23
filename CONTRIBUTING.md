@@ -43,6 +43,10 @@ cd .. && ./verify.sh
 - A UI change that a user can see comes with an end-to-end step in `e2e/tests/studio.spec.ts`. The harness has a fake dashboard chat API and `/__ctl/*` hooks to simulate the agent writing files; use them instead of mocking inside the UI.
 - Prefer testing through the public surface (HTTP routes, rendered DOM) over internals.
 
+## Releases
+
+`main` holds sources only; `ui/dist` is ignored there. The Kiro Crew app catalog installs by plain git clone with no build step, so it points at the `release` branch, which is `main` plus the built UI. To cut one, bump `version` in `app.json` and `APP_VERSION` in `backend/server.py` together (`verify.sh` checks they match), then run `tools/release.sh` from a clean `main`: it builds the UI, merges `main` into `release`, commits `ui/dist` there and tags `v<version>`. Push `main`, `release` and the tag.
+
 ## Commits and pull requests
 
 - One change per commit, English message: a short imperative first line, then why it was done and what a reader should know.
