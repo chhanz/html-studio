@@ -10,7 +10,7 @@ Routes (all GET):
   /slide/<index>             one slide fragment wrapped into a full page (?hs=select adds the overlay)
   /print                     every slide as one 1280x720 page (PDF export)
   /check                     measures every slide (deck check, headless)
-  /presenter?lang=           the presenter window (notes, next slide, timer, laser)
+  /presenter?lang=           the presenter window (notes, next slide, timer, pen)
   /present/state             shared presenter state (GET/POST, loopback CORS)
   /present/events            the same state pushed as Server-Sent Events
   /note?slide=               speaker note text for the presenter window
@@ -211,14 +211,6 @@ def _inject_script(page: str, js: str) -> str:
     return page + script
 
 
-def inject_audience_bridge(page: str) -> str:
-    """Return the built deck with the audience-window bridge (inject/audience.js) appended."""
-    script = "<script>" + (_INJECT_DIR / "audience.js").read_text(encoding="utf-8") + "</script>"
-    if _BODY_END_RE.search(page):
-        return _BODY_END_RE.sub(lambda _m: script + "</body>", page, count=1)
-    return page + script
-
-
 def inject_present_helper(page: str) -> str:
     """Return the page with the presenter helper appended to its body."""
     if _BODY_END_RE.search(page):
@@ -229,11 +221,19 @@ def inject_present_helper(page: str) -> str:
 class PresentState:
     """Shared presenter state for one deck, relayed through the preview server.
 
-    The presenter view (inside the dashboard) and the audience window (a system
-    browser) are different browser processes, so nothing client-side can link
-    them; both talk to this loopback server instead. Only slide index, blackout
-    and laser coordinates live here, so it needs no authentication.
+    The show (fullscreen inside the dashboard) and the presenter window (a
+    system browser) are different browser processes, so nothing client-side can
+    link them; both talk to this loopback server instead. Only slide index,
+    blackout and pen strokes live here, so it needs no authentication.
+
+    Pen strokes are kept per slide for the whole presentation (so going back
+    shows them again) and dropped when the show ends (``{"ink": {"op":
+    "reset"}}``). Coordinates are in the 1280x720 stage space. Ink changes are
+    also appended to a short op log so the event stream can send deltas instead
+    of the whole drawing on every point.
     """
+
+    INK_LOG = 512
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -241,21 +241,71 @@ class PresentState:
         self.seq = 0
         self.index = 0
         self.black = False
-        self.laser: dict[str, Any] = {"on": False, "x": 0, "y": 0}
+        self.ink: dict[int, list[dict[str, Any]]] = {}
+        self._ink_log: list[tuple[int, dict[str, Any]]] = []  # (seq, op)
         self.presenter_seen = 0.0
         self.audience_seen = 0.0
 
-    def snapshot(self) -> dict[str, Any]:
+    def _snapshot_locked(self, with_ink: bool) -> dict[str, Any]:
         now = time.time()
+        d: dict[str, Any] = {
+            "seq": self.seq,
+            "index": self.index,
+            "black": self.black,
+            "presenter": now - self.presenter_seen < 5,
+            "audience": now - self.audience_seen < 5,
+        }
+        if with_ink:
+            d["ink"] = {str(k): [dict(st) for st in v] for k, v in self.ink.items()}
+        return d
+
+    def snapshot(self, with_ink: bool = True) -> dict[str, Any]:
         with self._lock:
-            return {
-                "seq": self.seq,
-                "index": self.index,
-                "black": self.black,
-                "laser": dict(self.laser),
-                "presenter": now - self.presenter_seen < 5,
-                "audience": now - self.audience_seen < 5,
-            }
+            return self._snapshot_locked(with_ink)
+
+    def ink_ops_since(self, seq: int) -> list[dict[str, Any]] | None:
+        """Ink ops recorded after ``seq``; None when the log may have dropped some (reload the drawing)."""
+        with self._lock:
+            log = self._ink_log
+            if len(log) >= self.INK_LOG and log and log[0][0] > seq + 1:
+                return None
+            return [op for q, op in log if q > seq]
+
+    def _apply_ink(self, op: dict[str, Any]) -> dict[str, Any] | None:
+        kind = op.get("op")
+        if kind == "reset":
+            self.ink.clear()
+            return {"op": "reset"}
+        slide = op.get("slide")
+        if not isinstance(slide, int) or slide < 0:
+            return None
+        if kind == "clear":
+            self.ink.pop(slide, None)
+            return {"op": "clear", "slide": slide}
+        sid = op.get("id")
+        if not isinstance(sid, str) or not sid or len(sid) > 40:
+            return None
+        pts_in = op.get("pts")
+        if not isinstance(pts_in, list):
+            return None
+        pts: list[list[float]] = []
+        for pt in pts_in[:400]:
+            if isinstance(pt, list) and len(pt) == 2 and all(isinstance(v, (int, float)) for v in pt):
+                pts.append([round(float(pt[0]), 1), round(float(pt[1]), 1)])
+        if kind == "start":
+            strokes = self.ink.setdefault(slide, [])
+            if len(strokes) >= 200:
+                return None
+            strokes.append({"id": sid, "pts": pts[:1]})
+            return {"op": "start", "slide": slide, "id": sid, "pts": pts[:1]}
+        if kind == "add" and pts:
+            for st in self.ink.get(slide, []):
+                if st["id"] == sid:
+                    if len(st["pts"]) + len(pts) > 4000:
+                        return None
+                    st["pts"].extend(pts)
+                    return {"op": "add", "slide": slide, "id": sid, "pts": pts}
+        return None
 
     def update(self, body: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
@@ -271,16 +321,17 @@ class PresentState:
             if isinstance(body.get("black"), bool) and body["black"] != self.black:
                 self.black = body["black"]
                 changed = True
-            laser = body.get("laser")
-            if isinstance(laser, dict):
-                new = {"on": bool(laser.get("on")), "x": int(laser.get("x") or 0), "y": int(laser.get("y") or 0)}
-                if new != self.laser:
-                    self.laser = new
+            ink = body.get("ink")
+            if isinstance(ink, dict):
+                applied = self._apply_ink(ink)
+                if applied is not None:
                     changed = True
+                    self._ink_log.append((self.seq + 1, applied))
+                    del self._ink_log[: -self.INK_LOG]
             if changed:
                 self.seq += 1
                 self._changed.notify_all()
-        return self.snapshot()
+            return self._snapshot_locked(with_ink=False)
 
     def wait_for_change(self, since: int, timeout: float) -> bool:
         """Block until seq advances past ``since`` or ``timeout`` elapses."""
@@ -328,6 +379,11 @@ class DeckPreview:
 
             def log_message(self, *_a: Any) -> None:
                 return
+
+            # Keep-alive: the presenter posts many small pen updates; one
+            # connection per request would add a TCP handshake to each. Every
+            # response sets Content-Length (or is a stream), as HTTP/1.1 needs.
+            protocol_version = "HTTP/1.1"
 
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
@@ -457,8 +513,8 @@ class DeckPreview:
     def _present_events(self, h: BaseHTTPRequestHandler) -> None:
         """Server-Sent Events: push the presenter state the moment it changes.
 
-        Polling cannot make a laser pointer smooth; this stream delivers every
-        update (laser points included) with no polling gap. A comment line is
+        Polling would add a gap to every pen stroke; this stream delivers each
+        update (pen points included) as soon as it happens. A comment line is
         sent every 15s as a keepalive; the client reconnects on its own.
         """
         cors = _cors_origin(h)
@@ -471,10 +527,20 @@ class DeckPreview:
                 h.send_header("Access-Control-Allow-Origin", cors)
                 h.send_header("Vary", "Origin")
             h.end_headers()
+            # First event carries the whole drawing; later ones carry the ink
+            # ops since the last event (or the full drawing again after a gap).
             since = -1
             while True:
-                snap = self.present.snapshot()
+                snap = self.present.snapshot(with_ink=False)
                 if snap["seq"] != since:
+                    if since < 0:
+                        snap = self.present.snapshot(with_ink=True)
+                    else:
+                        ops = self.present.ink_ops_since(since)
+                        if ops is None:
+                            snap = self.present.snapshot(with_ink=True)
+                        elif ops:
+                            snap["ink_ops"] = ops
                     since = snap["seq"]
                     h.wfile.write(f"data: {json.dumps(snap)}\n\n".encode("utf-8"))
                     h.wfile.flush()
@@ -539,8 +605,6 @@ class DeckPreview:
             modes = parse_qs(url.query).get("hs", [])
             if "present" in modes:
                 data = inject_present_helper(data.decode("utf-8", errors="replace")).encode("utf-8")
-            elif "audience" in modes:
-                data = inject_audience_bridge(data.decode("utf-8", errors="replace")).encode("utf-8")
         return _send(h, 200, data, ctype)
 
 

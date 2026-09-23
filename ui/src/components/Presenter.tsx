@@ -19,7 +19,20 @@ type Props = {
   onPosition?: (slide: number) => void
 }
 
-type PresentStateWire = { seq: number; index: number; black: boolean; laser: { on: boolean; x: number; y: number }; presenter: boolean; audience: boolean }
+type Stroke = { id: string; pts: [number, number][] }
+type InkOp = { op: 'reset' } | { op: 'clear'; slide: number } | { op: 'start' | 'add'; slide: number; id: string; pts: [number, number][] }
+type PresentStateWire = {
+  seq: number
+  index: number
+  black: boolean
+  presenter: boolean
+  audience: boolean
+  ink?: Record<string, Stroke[]> // the whole drawing (first event, GET)
+  ink_ops?: InkOp[] // deltas since the previous event
+}
+
+const STAGE_W = 1280
+const STAGE_H = 720
 
 type Zoom = { kind: 'img'; src: string; alt: string } | { kind: 'svg'; svg: string }
 
@@ -55,9 +68,60 @@ export function Presenter({ t, url, baseUrl, startSlide, slideCount, onClose, op
   const blackRef = useRef(black)
   blackRef.current = black
   const [presenterOn, setPresenterOn] = useState(false)
-  const laserTarget = useRef({ on: false, x: 0, y: 0 })
-  const laserDot = useRef<HTMLDivElement>(null)
+  // Pen strokes drawn in the presenter window, per slide (index -> strokes), in
+  // 1280x720 stage coordinates; mapped onto the letterboxed deck here.
+  const inkRef = useRef<Record<string, Stroke[]>>({})
+  const inkCanvas = useRef<HTMLCanvasElement>(null)
   const stageBoxRef = useRef<HTMLDivElement>(null)
+  const redrawInk = useCallback(() => {
+    const c = inkCanvas.current
+    const box = stageBoxRef.current
+    if (!c || !box) return
+    const r = box.getBoundingClientRect()
+    const dpr = window.devicePixelRatio || 1
+    if (c.width !== Math.round(r.width * dpr) || c.height !== Math.round(r.height * dpr)) {
+      c.width = Math.round(r.width * dpr)
+      c.height = Math.round(r.height * dpr)
+    }
+    const ctx = c.getContext('2d')
+    if (!ctx) return
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
+    ctx.clearRect(0, 0, c.width, c.height)
+    // The deck runtime contain-fits the 1280x720 stage in the viewport, centred.
+    const sc = Math.min(r.width / STAGE_W, r.height / STAGE_H)
+    ctx.setTransform(sc * dpr, 0, 0, sc * dpr, ((r.width - STAGE_W * sc) / 2) * dpr, ((r.height - STAGE_H * sc) / 2) * dpr)
+    ctx.strokeStyle = '#ef4444'
+    ctx.lineWidth = 4
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+    for (const st of inkRef.current[String(currentRef.current - 1)] || []) {
+      if (!st.pts.length) continue
+      ctx.beginPath()
+      ctx.moveTo(st.pts[0][0], st.pts[0][1])
+      if (st.pts.length === 1) ctx.lineTo(st.pts[0][0] + 0.1, st.pts[0][1])
+      for (let i = 1; i < st.pts.length; i++) ctx.lineTo(st.pts[i][0], st.pts[i][1])
+      ctx.stroke()
+    }
+    c.dataset.strokes = String((inkRef.current[String(currentRef.current - 1)] || []).length)
+  }, [])
+  const applyInkOp = useCallback((op: InkOp) => {
+    const ink = inkRef.current
+    if (op.op === 'reset') {
+      inkRef.current = {}
+      return
+    }
+    const key = String(op.slide)
+    if (op.op === 'clear') {
+      delete ink[key]
+      return
+    }
+    const list = ink[key] || (ink[key] = [])
+    if (op.op === 'start') list.push({ id: op.id, pts: op.pts.slice() })
+    else {
+      const st = list.find((x) => x.id === op.id)
+      if (st) st.pts.push(...op.pts)
+    }
+  }, [])
   const inflight = useRef(0) // polls are skipped while our own writes are in flight
   const post = useCallback(
     (body: Record<string, unknown>) => {
@@ -123,6 +187,11 @@ export function Presenter({ t, url, baseUrl, startSlide, slideCount, onClose, op
     [post, postFrame, slideCount, frameUrl],
   )
 
+  // The pen is per slide: redraw whenever the slide shown changes.
+  useEffect(() => {
+    redrawInk()
+  }, [current, redrawInk])
+
   // F: none. Esc is the single exit (fullscreen and presentation are one thing).
 
   // Ask the deck what is under the pointer; it answers hs-zoom or hs-miss.
@@ -136,11 +205,11 @@ export function Presenter({ t, url, baseUrl, startSlide, slideCount, onClose, op
   // Presenter window + state sync.
   useEffect(() => {
     let alive = true
-    let raf = 0
     let ready = false
     // Seed the shared state with OUR slide first (awaited), so the first poll
     // does not drag us to whatever the server remembered from a previous show.
-    void fetch(stateUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: 'audience', index: startSlide - 1, black: false, laser: { on: false, x: 0, y: 0 } }) })
+    // A new show starts with a clean sheet: the pen is for this presentation only.
+    void fetch(stateUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: 'audience', index: startSlide - 1, black: false, ink: { op: 'reset' } }) })
       .then((r) => r.json())
       .then((st: PresentStateWire) => {
         seqRef.current = st.seq
@@ -150,28 +219,18 @@ export function Presenter({ t, url, baseUrl, startSlide, slideCount, onClose, op
         ready = true
       })
     void openPresenter?.(startSlide)
-    const cur = { x: 0, y: 0 }
-    const step = () => {
-      raf = 0
-      const dot = laserDot.current
-      const box = stageBoxRef.current
-      const tgt = laserTarget.current
-      if (!dot || !box) return
-      if (!tgt.on) {
-        dot.style.display = 'none'
-        return
-      }
-      cur.x += (tgt.x - cur.x) * 0.45
-      cur.y += (tgt.y - cur.y) * 0.45
-      const r = box.getBoundingClientRect()
-      dot.style.display = 'block'
-      dot.style.left = `${(cur.x / 1280) * r.width}px`
-      dot.style.top = `${(cur.y / 720) * r.height}px`
-      if (Math.abs(tgt.x - cur.x) + Math.abs(tgt.y - cur.y) > 0.3) raf = requestAnimationFrame(step)
-    }
     const apply = (st: PresentStateWire) => {
         if (!alive) return
         setPresenterOn(st.presenter)
+        // Ink is applied even for states we have "seen": the drawing rides on
+        // the same sequence as our own index/black writes.
+        if (st.ink) {
+          inkRef.current = st.ink
+          redrawInk()
+        } else if (st.ink_ops?.length) {
+          st.ink_ops.forEach(applyInkOp)
+          redrawInk()
+        }
         if (st.seq === seqRef.current) return
         seqRef.current = st.seq
         // Apply by value, not by sequence: a write of ours may have landed between
@@ -185,12 +244,8 @@ export function Presenter({ t, url, baseUrl, startSlide, slideCount, onClose, op
           if (f) f.src = `${frameUrl}#${n}`
         }
         if (typeof st.black === 'boolean' && st.black !== blackRef.current) setBlack(st.black)
-        const l = st.laser || { on: false, x: 0, y: 0 }
-        if (!laserTarget.current.on && l.on) Object.assign(cur, { x: l.x, y: l.y })
-        laserTarget.current = { on: !!l.on, x: l.x, y: l.y }
-        if (!raf) raf = requestAnimationFrame(step)
     }
-    // Push first: the server streams every change (laser points included) as
+    // Push first: the server streams every change (pen points included) as
     // Server-Sent Events. Polling stays as a slow fallback for presence and in
     // case the stream drops.
     let es: EventSource | null = null
@@ -217,11 +272,14 @@ export function Presenter({ t, url, baseUrl, startSlide, slideCount, onClose, op
     }
     void tick()
     const id = setInterval(tick, es ? 1000 : 100)
+    window.addEventListener('resize', redrawInk)
     return () => {
       alive = false
       clearInterval(id)
       es?.close()
-      if (raf) cancelAnimationFrame(raf)
+      window.removeEventListener('resize', redrawInk)
+      // The show is over: the pen goes with it (the presenter window clears too).
+      void fetch(stateUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: 'audience', ink: { op: 'reset' } }), keepalive: true }).catch(() => undefined)
       onPosition?.(currentRef.current)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -327,13 +385,8 @@ export function Presenter({ t, url, baseUrl, startSlide, slideCount, onClose, op
           tabIndex={-1}
           className="absolute inset-0 w-full h-full border-0"
         />
-        {/* Laser dot driven by the presenter window (eased toward the last reported point). */}
-        <div
-          ref={laserDot}
-          data-testid="present-laser"
-          className="absolute rounded-full pointer-events-none"
-          style={{ display: 'none', width: 18, height: 18, marginLeft: -9, marginTop: -9, background: 'rgba(255,40,40,.95)', boxShadow: '0 0 12px 4px rgba(255,40,40,.55)', zIndex: 5 }}
-        />
+        {/* Pen strokes drawn in the presenter window, mirrored onto the deck. */}
+        <canvas ref={inkCanvas} data-testid="present-ink" aria-hidden className="absolute inset-0 w-full h-full pointer-events-none" style={{ zIndex: 5 }} />
         {black && <div data-testid="present-black" className="absolute inset-0" style={{ background: '#000', zIndex: 6 }} />}
       </div>
       {/* Click shield: keeps focus here; a click is hit-tested in the deck

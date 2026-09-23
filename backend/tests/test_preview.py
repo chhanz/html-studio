@@ -260,23 +260,6 @@ class PresentHelperTests(unittest.TestCase):
             finally:
                 p.stop()
 
-    def test_audience_bridge_injected_with_audience_query(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            deck = Path(tmp) / "deck"
-            (deck / "slides").mkdir(parents=True)
-            (deck / "slides" / "010.html").write_text("<section class='slide'>x</section>")
-            (deck / "out").mkdir()
-            (deck / "out" / "index.html").write_text("<html><body><p>deck</p></body></html>")
-            p = preview.DeckPreview(deck, "slides", None, extra_files=("out/index.html",))
-            port = p.start()
-            try:
-                body = urllib.request.urlopen(f"http://127.0.0.1:{port}/out/index.html?hs=audience").read()
-                self.assertIn(b"/present/state", body)
-                self.assertIn(b"hs-laser", body)
-                self.assertNotIn(b"hs-hit", body)  # the presenter helper is a different mode
-            finally:
-                p.stop()
-
     def test_present_state_relay(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             deck = Path(tmp) / "deck"
@@ -291,14 +274,24 @@ class PresentHelperTests(unittest.TestCase):
                 def post(obj):
                     req = urllib.request.Request(base, data=json.dumps(obj).encode(), method="POST", headers={"Content-Type": "application/json"})
                     return json.loads(urllib.request.urlopen(req).read())
-                st = post({"from": "presenter", "index": 3, "laser": {"on": True, "x": 100, "y": 200}})
-                self.assertEqual((st["seq"], st["index"], st["laser"], st["presenter"], st["audience"]), (1, 3, {"on": True, "x": 100, "y": 200}, True, False))
+                st = post({"from": "presenter", "index": 3, "ink": {"op": "start", "slide": 3, "id": "s1", "pts": [[10.04, 20]]}})
+                self.assertEqual((st["seq"], st["index"], st["presenter"], st["audience"]), (1, 3, True, False))
+                self.assertNotIn("ink", st)  # POST replies never carry the drawing
+                st = post({"from": "presenter", "ink": {"op": "add", "slide": 3, "id": "s1", "pts": [[11, 21], [12, 22.26]]}})
+                self.assertEqual(st["seq"], 2)
+                full = json.loads(urllib.request.urlopen(base).read())
+                self.assertEqual(full["ink"], {"3": [{"id": "s1", "pts": [[10.0, 20.0], [11.0, 21.0], [12.0, 22.3]]}]})
+                st = post({"from": "presenter", "ink": {"op": "add", "slide": 3, "id": "nope", "pts": [[1, 1]]}})  # unknown stroke: ignored
+                self.assertEqual(st["seq"], 2)
+                st = post({"from": "presenter", "ink": {"op": "clear", "slide": 3}})
+                self.assertEqual(st["seq"], 3)
+                self.assertEqual(json.loads(urllib.request.urlopen(base).read())["ink"], {})
                 st = post({"from": "audience"})  # heartbeat only, nothing changes
-                self.assertEqual((st["seq"], st["audience"]), (1, True))
+                self.assertEqual((st["seq"], st["audience"]), (3, True))
                 st = post({"from": "audience", "index": 4, "black": True})
-                self.assertEqual((st["seq"], st["index"], st["black"]), (2, 4, True))
+                self.assertEqual((st["seq"], st["index"], st["black"]), (4, 4, True))
                 st = post({"from": "audience", "index": "nope", "black": "yes"})  # ignored types
-                self.assertEqual((st["seq"], st["index"], st["black"]), (2, 4, True))
+                self.assertEqual((st["seq"], st["index"], st["black"]), (4, 4, True))
                 with self.assertRaises(urllib.error.HTTPError) as ctx:
                     urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{port}/slide/0", data=b"{}", method="POST"))
                 ctx.exception.close()
@@ -311,6 +304,29 @@ class PresentHelperTests(unittest.TestCase):
                 self.assertEqual((r.status, r.headers.get("Access-Control-Allow-Methods")), (204, "GET, POST, OPTIONS"))
             finally:
                 p.stop()
+
+    def test_present_state_ink_rules(self) -> None:
+        st = preview.PresentState()
+        st.update({"ink": {"op": "start", "slide": 0, "id": "a", "pts": [[1, 2]]}})
+        st.update({"ink": {"op": "add", "slide": 0, "id": "a", "pts": [[3, 4]]}})
+        st.update({"ink": {"op": "start", "slide": 1, "id": "b", "pts": [[9, 9]]}})
+        self.assertEqual(sorted(st.snapshot()["ink"]), ["0", "1"])
+        self.assertEqual(st.ink_ops_since(1), [{"op": "add", "slide": 0, "id": "a", "pts": [[3.0, 4.0]]}, {"op": "start", "slide": 1, "id": "b", "pts": [[9.0, 9.0]]}])
+        self.assertEqual(st.ink_ops_since(3), [])
+        # Bad ops change nothing.
+        seq = st.seq
+        for bad in ({"op": "start", "slide": -1, "id": "x", "pts": [[1, 1]]}, {"op": "add", "slide": 0, "id": "a", "pts": "no"}, {"op": "start", "slide": 0, "id": "", "pts": []}):
+            st.update({"ink": bad})
+        self.assertEqual(st.seq, seq)
+        # Reset drops everything (the show does this when it ends).
+        st.update({"ink": {"op": "reset"}})
+        self.assertEqual(st.snapshot()["ink"], {})
+        self.assertEqual(st.ink_ops_since(seq), [{"op": "reset"}])
+        # Once the log has wrapped, a client that is too far behind is told to reload.
+        for i in range(preview.PresentState.INK_LOG + 5):
+            st.update({"ink": {"op": "clear", "slide": i}})
+        self.assertIsNone(st.ink_ops_since(seq))
+        self.assertIsNotNone(st.ink_ops_since(st.seq - 3))
 
     def test_present_events_stream_pushes_changes(self) -> None:
         import threading
@@ -339,15 +355,17 @@ class PresentHelperTests(unittest.TestCase):
                 th = threading.Thread(target=reader, daemon=True)
                 th.start()
                 time.sleep(0.2)
-                for body in ({"from": "presenter", "index": 2}, {"from": "presenter", "laser": {"on": True, "x": 5, "y": 6}}):
+                for body in ({"from": "presenter", "index": 2}, {"from": "presenter", "ink": {"op": "start", "slide": 2, "id": "a", "pts": [[5, 6]]}}):
                     req = urllib.request.Request(f"{base}/present/state", data=json.dumps(body).encode(), method="POST", headers={"Content-Type": "application/json"})
                     urllib.request.urlopen(req).read()
                     time.sleep(0.05)
                 th.join(timeout=3)
                 resp.close()
                 self.assertEqual([g["seq"] for g in got], [0, 1, 2])
+                self.assertEqual(got[0]["ink"], {})  # the first event carries the whole drawing
                 self.assertEqual(got[1]["index"], 2)
-                self.assertEqual(got[2]["laser"], {"on": True, "x": 5, "y": 6})
+                self.assertNotIn("ink", got[1])
+                self.assertEqual(got[2]["ink_ops"], [{"op": "start", "slide": 2, "id": "a", "pts": [[5.0, 6.0]]}])
             finally:
                 p.stop()
 
@@ -365,7 +383,7 @@ class PresentHelperTests(unittest.TestCase):
                 page = urllib.request.urlopen(f"http://127.0.0.1:{port}/presenter?lang=ko").read().decode()
                 self.assertIn('window.HS_PRESENTER={"count": 2, "slides": ["010.html", "020.html"]', page)
                 self.assertIn('"lang": "ko"', page)
-                self.assertIn("hs-present-", page)
+                self.assertIn('id="cur-ink"', page)  # the pen canvas over the current slide
                 n = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/note?slide=020.html").read())
                 self.assertEqual(n, {"slide": "020.html", "text": "- say this\n"})
                 n = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/note?slide=010.html").read())

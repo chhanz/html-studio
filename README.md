@@ -5,7 +5,7 @@ A [Kiro Crew](https://kiro.dev) app for viewing, editing, checking and presentin
 - Browse decks (one HTML file per slide) and preview them live
 - Point at an element in the preview, leave a comment, and let the agent apply the change
 - Run deck checks (overflow, forbidden patterns, missing cover, contrast)
-- Present from the current slide, with speaker notes and a laser pointer
+- Present from the current slide, with speaker notes and a pen that draws on the show
 - Export to PDF
 - Themes follow the [DESIGN.md](https://github.com/VoltAgent/awesome-design-md) format
 

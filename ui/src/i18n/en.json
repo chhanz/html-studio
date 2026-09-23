@@ -190,5 +190,5 @@
   "present.presenter_on": "Presenter window connected",
   "present.presenter_off": "No presenter window",
   "present.presenter_window": "Presenter window",
-  "present.presenter_hint": "Open the presenter window (notes, next slide, timer, laser) in your browser; drag it to your own screen"
+  "present.presenter_hint": "Open the presenter window (notes, next slide, timer, pen) in your browser; drag it to your own screen"
 }

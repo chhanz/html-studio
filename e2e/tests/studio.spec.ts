@@ -646,7 +646,7 @@ test('speaker notes: autosaves notes/<slide>.md, marks the thumbnail, survives r
   await expect(page.locator('#slides-body li').nth(0).getByTestId('strip-note')).toHaveCount(0)
 })
 
-test('present opens the presenter window in ANOTHER browser and stays in sync: slides, laser, black', async ({ page, browser }) => {
+test('present opens the presenter window in ANOTHER browser and stays in sync: slides, pen, black', async ({ page, browser }) => {
   await openApp(page)
   await addFixtureRoot(page)
   await selectDeck(page, 'acme-quarterly')
@@ -686,15 +686,44 @@ test('present opens the presenter window in ANOTHER browser and stays in sync: s
   await expect(frame.locator('#hs-counter')).toHaveText('3 / 4')
   await expect(presenter.locator('#cur-label')).toHaveText('Slide 3 of 4')
 
-  // Laser: pointer over the presenter's current slide lights the dot in the show.
+  // Pen: a drag on the presenter's current slide draws a stroke that the show mirrors.
   const stage = presenter.locator('#cur-stage')
   const box = (await stage.boundingBox())!
-  await presenter.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.5)
-  await presenter.mouse.move(box.x + box.width * 0.31, box.y + box.height * 0.5)
-  const dot = page.getByTestId('present-laser')
-  await expect(dot).toBeVisible()
-  await presenter.mouse.move(2, 2)
-  await expect(dot).toBeHidden()
+  const stateUrl = presenterUrl.replace(/\/presenter.*$/, '/present/state')
+  const strokesOf = async (slide: number) => ((await (await page.request.get(stateUrl)).json()).ink?.[String(slide)] ?? []) as { id: string; pts: [number, number][] }[]
+  await presenter.mouse.move(box.x + box.width * 0.2, box.y + box.height * 0.5)
+  await presenter.mouse.down()
+  await presenter.mouse.move(box.x + box.width * 0.6, box.y + box.height * 0.6, { steps: 12 })
+  await presenter.mouse.up()
+  const ink = page.getByTestId('present-ink')
+  await expect(ink).toHaveAttribute('data-strokes', '1')
+  await expect.poll(async () => (await strokesOf(2))[0]?.pts.length ?? 0).toBeGreaterThan(5)
+  const pts = (await strokesOf(2))[0].pts
+  expect(pts[0][0]).toBeGreaterThan(200) // 20% of the 1280 stage
+  expect(pts[0][0]).toBeLessThan(320)
+  expect(pts[pts.length - 1][0]).toBeGreaterThan(700) // 60%
+  // The drawing belongs to slide 3: the next slide is blank, coming back shows it again.
+  await presenter.keyboard.press('ArrowRight')
+  await expect(frame.locator('#hs-counter')).toHaveText('4 / 4')
+  await expect(ink).toHaveAttribute('data-strokes', '0')
+  await presenter.keyboard.press('ArrowLeft')
+  await expect(frame.locator('#hs-counter')).toHaveText('3 / 4')
+  await expect(ink).toHaveAttribute('data-strokes', '1')
+  // A second stroke, then Clear removes this slide's drawing everywhere.
+  await presenter.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.2)
+  await presenter.mouse.down()
+  await presenter.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.4, { steps: 6 })
+  await presenter.mouse.up()
+  await expect(ink).toHaveAttribute('data-strokes', '2')
+  await presenter.getByRole('button', { name: 'Clear pen' }).click()
+  await expect(ink).toHaveAttribute('data-strokes', '0')
+  expect(await strokesOf(2)).toEqual([])
+  // Draw once more so the end of the show has something to wipe.
+  await presenter.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.3)
+  await presenter.mouse.down()
+  await presenter.mouse.move(box.x + box.width * 0.4, box.y + box.height * 0.3, { steps: 4 })
+  await presenter.mouse.up()
+  await expect(ink).toHaveAttribute('data-strokes', '1')
 
   // Black both ways.
   await presenter.locator('#black').click()
@@ -704,9 +733,17 @@ test('present opens the presenter window in ANOTHER browser and stays in sync: s
   await expect(page.getByTestId('present-black')).toHaveCount(0)
   await expect(presenter.locator('#black')).toHaveAttribute('aria-pressed', 'false')
 
-  // Esc ends the show; the studio lands on the slide we ended on.
+  // Esc ends the show; the studio lands on the slide we ended on, and the pen is gone
+  // (server state reset, presenter canvas cleared).
   await page.keyboard.press('Escape')
   await expect(dialog).toHaveCount(0)
   await expect(page.getByText('3 / 4')).toBeVisible()
+  await expect.poll(async () => JSON.stringify((await (await page.request.get(stateUrl)).json()).ink)).toBe('{}')
+  await expect.poll(() => presenter.evaluate(() => {
+    const c = document.getElementById('cur-ink') as HTMLCanvasElement
+    const d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data
+    for (let i = 3; i < d.length; i += 4) if (d[i]) return 'inked'
+    return 'blank'
+  })).toBe('blank')
   await other.close()
 })

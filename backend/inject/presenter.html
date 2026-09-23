@@ -22,12 +22,13 @@
   main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); grid-template-rows: minmax(0, 1fr) auto; gap: 12px; padding: 12px; }
   .col { min-height: 0; display: flex; flex-direction: column; gap: 4px; }
   .label { color: #999; font-size: 12px; display: flex; gap: 8px; align-items: center; }
-  .label .laser { color: #f87171; }
   .fit { flex: 1; min-height: 0; position: relative; }
   .fit.next { flex: 0 0 38%; }
   .stage { position: absolute; left: 50%; top: 50%; transform-origin: center center; background: #fff; border-radius: 6px; overflow: hidden; }
   .stage iframe { width: 1280px; height: 720px; border: 0; pointer-events: none; }
+  .stage canvas { position: absolute; left: 0; top: 0; width: 1280px; height: 720px; }
   #cur .stage { cursor: crosshair; }
+  #cur-ink { touch-action: none; }
   .notes { flex: 1; min-height: 0; overflow-y: auto; background: #151518; border-radius: 6px; padding: 12px 14px; font-size: 16px; line-height: 1.55; white-space: pre-wrap; margin-top: 6px; }
   .notes.empty { color: #666; }
   footer { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; color: #999; font-size: 12px; }
@@ -41,12 +42,13 @@
   <span class="clock" id="clock"></span>
   <span class="presence" id="presence"><i></i><span data-i18n="audience_none">No audience window</span></span>
   <span class="sp"></span>
+  <button id="clear" data-i18n="clear">Clear pen</button>
   <button id="black" aria-pressed="false" data-i18n="black">Black</button>
 </header>
 <main>
   <section class="col" id="cur">
-    <div class="label"><span id="cur-label"></span><span id="cur-name"></span><span class="laser" id="laser-flag" hidden data-i18n="laser">laser</span></div>
-    <div class="fit" id="cur-fit"><div class="stage" id="cur-stage"><iframe id="cur-frame" title="current"></iframe></div></div>
+    <div class="label"><span id="cur-label"></span><span id="cur-name"></span></div>
+    <div class="fit" id="cur-fit"><div class="stage" id="cur-stage"><iframe id="cur-frame" title="current"></iframe><canvas id="cur-ink" width="1280" height="720" aria-label="pen"></canvas></div></div>
   </section>
   <section class="col">
     <div class="label" id="next-label"></div>
@@ -58,7 +60,7 @@
     <button id="prev" aria-label="previous">&#9666;</button>
     <span class="num" id="pos"></span>
     <button id="next" aria-label="next">&#9656;</button>
-    <span data-i18n="keys">Arrows: navigate. Move the mouse over the slide to point. Esc: close.</span>
+    <span data-i18n="keys">Arrows: navigate. Drag on the slide to draw. Esc: close.</span>
   </footer>
 </main>
 <script>
@@ -67,10 +69,10 @@
   var CFG = window.HS_PRESENTER || { count: 0, slides: [], stage: { width: 1280, height: 720 }, lang: 'en' }
   var W = CFG.stage.width, H = CFG.stage.height
   var STRINGS = {
-    en: { title: 'Presenter', audience_none: 'Show not connected', audience_on: 'Show connected', black: 'Black', notes: 'Notes', laser: 'laser',
-          keys: 'Arrows: navigate. Move the mouse over the slide to point. Esc: close.', current: 'Slide {n} of {total}', next: 'Next: slide {n}', last: 'Last slide', no_notes: 'No notes for this slide.' },
-    ko: { title: '발표자', audience_none: '발표 화면 연결 안 됨', audience_on: '발표 화면 연결됨', black: '블랙', notes: '노트', laser: '레이저',
-          keys: '화살표: 이동. 슬라이드 위에서 마우스를 움직이면 레이저. Esc: 닫기.', current: '슬라이드 {n} / {total}', next: '다음: {n}번', last: '마지막 슬라이드', no_notes: '이 슬라이드에는 노트가 없습니다.' },
+    en: { title: 'Presenter', audience_none: 'Show not connected', audience_on: 'Show connected', black: 'Black', notes: 'Notes', clear: 'Clear pen',
+          keys: 'Arrows: navigate. Drag on the slide to draw. Esc: close.', current: 'Slide {n} of {total}', next: 'Next: slide {n}', last: 'Last slide', no_notes: 'No notes for this slide.' },
+    ko: { title: '발표자', audience_none: '발표 화면 연결 안 됨', audience_on: '발표 화면 연결됨', black: '블랙', notes: '노트', clear: '펜 지우기',
+          keys: '화살표: 이동. 슬라이드 위에서 드래그하면 그리기. Esc: 닫기.', current: '슬라이드 {n} / {total}', next: '다음: {n}번', last: '마지막 슬라이드', no_notes: '이 슬라이드에는 노트가 없습니다.' },
   }
   var S = STRINGS[(CFG.lang || 'en').slice(0, 2)] || STRINGS.en
   function t(k, v) { var s = S[k] || k; if (v) for (var key in v) s = s.replace('{' + key + '}', v[key]); return s }
@@ -79,7 +81,6 @@
 
   var index = Math.max(0, Math.min(CFG.count - 1, (parseInt(location.hash.slice(1), 10) || 1) - 1))
   var black = false
-  var channel = new BroadcastChannel('hs-present-' + location.port)
   var STATE = '/present/state'
   var inflight = 0
   function post(obj) {
@@ -95,8 +96,14 @@
   function applyState(st) {
     if (!st) return
     if (st.audience) alive()
-    if (typeof st.index === 'number' && st.index !== index) { index = Math.max(0, Math.min(CFG.count - 1, st.index)); render() }
-    if (typeof st.black === 'boolean' && st.black !== black) setBlackUI(st.black)
+    if (inflight === 0) {
+      if (typeof st.index === 'number' && st.index !== index) { index = Math.max(0, Math.min(CFG.count - 1, st.index)); render() }
+      if (typeof st.black === 'boolean' && st.black !== black) setBlackUI(st.black)
+    }
+    // A full drawing replaces ours only while we are not mid-stroke (the server
+    // copy lags our local batch by a frame); deltas skip our own strokes anyway.
+    if (st.ink && !drawing && !busy) { ink = {}; for (var k in st.ink) ink[k] = st.ink[k]; redrawInk() }
+    if (st.ink_ops) { st.ink_ops.forEach(applyInkOp); redrawInk() }
   }
 
   // --- layout: scale the 1280x720 frames into their boxes ----------------------
@@ -132,19 +139,18 @@
     else fetch('/note?slide=' + encodeURIComponent(slide)).then(function (r) { return r.json() }).then(function (n) { notesCache[slide] = n.text || ''; if (CFG.slides[index] === slide) show(notesCache[slide]) }).catch(function () { show('') })
     history.replaceState(null, '', '#' + (index + 1))
     layout()
+    redrawInk()
   }
   function go(n) {
     var next = Math.max(0, Math.min(CFG.count - 1, n))
     if (next === index) return
     index = next
     render()
-    channel.postMessage({ from: 'presenter', type: 'goto', index: index })
     post({ index: index })
   }
   function setBlack(on) {
     black = on
     document.getElementById('black').setAttribute('aria-pressed', on ? 'true' : 'false')
-    channel.postMessage({ from: 'presenter', type: 'black', on: on })
     post({ black: on })
   }
   document.getElementById('prev').onclick = function () { go(index - 1) }
@@ -156,76 +162,108 @@
     else if (e.key === 'ArrowLeft' || e.key === 'PageUp' || e.key === 'Backspace') go(index - 1)
     else if (e.key === 'Home') go(0)
     else if (e.key === 'End') go(CFG.count - 1)
-    else if (e.key === 'Escape') { channel.postMessage({ from: 'presenter', type: 'bye' }); window.close() }
+    else if (e.key === 'Escape') window.close()
     else return
     e.preventDefault()
   })
 
-  // --- laser: direct to the audience over the channel, throttled by frame -----
-  var pending = null, flag = document.getElementById('laser-flag')
-  // Laser points go to the state server as fast as the pointer moves, but with
-  // ONE request in flight at a time: while a request is out, the newest point
-  // replaces the queued one (coalescing), so the show never lags behind a queue.
-  var laserBusy = false, laserQueued = null
-  function pushLaser(l) {
-    if (laserBusy) { laserQueued = l; return }
-    laserBusy = true
-    fetch(STATE, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: 'presenter', laser: l }) })
-      .catch(function () {})
-      .then(function () {
-        laserBusy = false
-        if (laserQueued) { var q = laserQueued; laserQueued = null; pushLaser(q) }
-      })
+  // --- pen: draw on the current slide; strokes live on the server per slide ----
+  // Coordinates are in the 1280x720 stage space, so the show can scale them to
+  // its own screen. Our own strokes are drawn locally at once; the server echo
+  // of them is skipped (ids in `mine`), while a reset from the show clears all.
+  var ink = {}, mine = {}
+  var canvas = document.getElementById('cur-ink'), ctx = canvas.getContext('2d')
+  function strokeStyle() { ctx.strokeStyle = '#ef4444'; ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.lineJoin = 'round' }
+  function drawStroke(st) {
+    var pts = st.pts
+    if (!pts.length) return
+    ctx.beginPath()
+    ctx.moveTo(pts[0][0], pts[0][1])
+    if (pts.length === 1) ctx.lineTo(pts[0][0] + 0.1, pts[0][1])
+    for (var i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1])
+    ctx.stroke()
   }
-  function flush() {
-    if (!pending) return
-    channel.postMessage({ from: 'presenter', type: 'laser', x: pending.x, y: pending.y, on: pending.on })
-    pushLaser({ on: pending.on, x: pending.x, y: pending.y })
-    pending = null
+  function redrawInk() {
+    ctx.clearRect(0, 0, W, H)
+    strokeStyle()
+    ;(ink[index] || []).forEach(drawStroke)
   }
-  document.getElementById('cur-fit').addEventListener('mousemove', function (e) {
+  function applyInkOp(op) {
+    if (op.op === 'reset') { ink = {}; return }
+    if (op.op === 'clear') { delete ink[op.slide]; return }
+    if (mine[op.id]) return
+    var list = ink[op.slide] || (ink[op.slide] = [])
+    if (op.op === 'start') list.push({ id: op.id, pts: op.pts.slice() })
+    else if (op.op === 'add') for (var i = 0; i < list.length; i++) if (list[i].id === op.id) { list[i].pts = list[i].pts.concat(op.pts); break }
+  }
+  // Outgoing points are batched per frame with one request in flight; while a
+  // request is out the batch keeps growing, so nothing is lost or reordered.
+  var drawing = null, batch = [], busy = false, queue = []
+  function sendInk(op) {
+    queue.push(op)
+    if (!busy) pump()
+  }
+  function pump() {
+    if (!queue.length) { busy = false; return }
+    busy = true
+    var op = queue.shift()
+    fetch(STATE, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: 'presenter', ink: op }) })
+      .catch(function () {}).then(pump)
+  }
+  function flushBatch() {
+    if (!drawing || !batch.length) return
+    sendInk({ op: 'add', slide: drawing.slide, id: drawing.id, pts: batch })
+    batch = []
+  }
+  function stagePoint(e) {
     var r = document.getElementById('cur-stage').getBoundingClientRect()
     var x = (e.clientX - r.left) / r.width * W, y = (e.clientY - r.top) / r.height * H
-    var on = x >= 0 && y >= 0 && x <= W && y <= H
-    flag.hidden = !on
-    var first = !pending
-    pending = { x: Math.round(x), y: Math.round(y), on: on }
-    if (first) requestAnimationFrame(flush)
+    return [Math.round(Math.max(0, Math.min(W, x)) * 10) / 10, Math.round(Math.max(0, Math.min(H, y)) * 10) / 10]
+  }
+  canvas.addEventListener('pointerdown', function (e) {
+    if (e.button !== 0) return
+    e.preventDefault()
+    canvas.setPointerCapture(e.pointerId)
+    var pt = stagePoint(e), id = Math.random().toString(36).slice(2, 10)
+    mine[id] = true
+    drawing = { id: id, slide: index, last: pt }
+    ;(ink[index] || (ink[index] = [])).push({ id: id, pts: [pt] })
+    redrawInk()
+    sendInk({ op: 'start', slide: index, id: id, pts: [pt] })
   })
-  document.getElementById('cur-fit').addEventListener('mouseleave', function () {
-    flag.hidden = true
-    pending = { x: 0, y: 0, on: false }
-    flush()
+  canvas.addEventListener('pointermove', function (e) {
+    if (!drawing) return
+    var pt = stagePoint(e)
+    if (Math.abs(pt[0] - drawing.last[0]) + Math.abs(pt[1] - drawing.last[1]) < 1.5) return
+    var list = ink[drawing.slide], st = list[list.length - 1]
+    st.pts.push(pt)
+    strokeStyle(); ctx.beginPath(); ctx.moveTo(drawing.last[0], drawing.last[1]); ctx.lineTo(pt[0], pt[1]); ctx.stroke()
+    drawing.last = pt
+    if (!batch.length) requestAnimationFrame(flushBatch)
+    batch.push(pt)
   })
+  function endStroke() { if (!drawing) return; flushBatch(); drawing = null }
+  canvas.addEventListener('pointerup', endStroke)
+  canvas.addEventListener('pointercancel', endStroke)
+  document.getElementById('clear').onclick = function () {
+    delete ink[index]; redrawInk()
+    sendInk({ op: 'clear', slide: index })
+  }
 
-  // --- follow the audience (channel first, state as a fallback) ----------------
+  // --- follow the show: pushed by the server (SSE); a slow poll for presence ------
   var presence = document.getElementById('presence'), seen = 0
   function alive() { seen = Date.now(); presence.classList.add('on'); presence.lastElementChild.textContent = t('audience_on') }
-  channel.onmessage = function (e) {
-    var m = e.data || {}
-    if (m.from !== 'audience') return
-    if (m.type === 'hello' || m.type === 'pong') { alive(); channel.postMessage({ from: 'presenter', type: 'goto', index: index }); channel.postMessage({ from: 'presenter', type: 'black', on: black }) }
-    else if (m.type === 'slide' && typeof m.index === 'number') { alive(); if (m.index !== index) { index = Math.max(0, Math.min(CFG.count - 1, m.index)); render() } }
-    else if (m.type === 'black' && typeof m.on === 'boolean') { alive(); setBlackUI(m.on) }
-    else if (m.type === 'bye') { seen = 0 }
-  }
-  channel.postMessage({ from: 'presenter', type: 'ping' })
-  // Push from the server (SSE) for the show's moves; a slow poll remains for presence.
   try {
     var es = new EventSource('/present/events')
-    es.onmessage = function (e) { if (inflight > 0) return; try { applyState(JSON.parse(e.data)) } catch (_e) {} }
+    es.onmessage = function (e) { try { applyState(JSON.parse(e.data)) } catch (_e) {} }
   } catch (_e) {}
   setInterval(function () {
-    if (inflight > 0) return
     fetch(STATE).then(function (r) { return r.json() }).then(function (st) {
       applyState(st)
       if (Date.now() - seen > 6000) { presence.classList.remove('on'); presence.lastElementChild.textContent = t('audience_none') }
     }).catch(function () {})
   }, 1000)
-  setInterval(function () {
-    channel.postMessage({ from: 'presenter', type: 'ping' })
-    post({})
-  }, 2000)
+  setInterval(function () { post({}) }, 2000)
 
   // --- timer / clock -----------------------------------------------------------
   var started = Date.now()
