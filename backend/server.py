@@ -50,7 +50,7 @@ BUILD_JOBS = check_lib.CheckJobs("build")  # external build commands run off the
 PREVIEWS = preview_lib.PreviewRegistry()
 
 APP_NAME = os.environ.get("KIROCREW_APP_NAME", "html-studio")
-APP_VERSION = "0.1.33"
+APP_VERSION = "0.1.34"
 PORT = int(os.environ.get("PORT", "9100"))
 HOME = Path(os.environ.get("KIROCREW_HOME", str(Path.home() / ".kiro" / "crew")))
 DATA_DIR = HOME / "apps" / APP_NAME / "data"
@@ -64,6 +64,14 @@ def _resolve_layout(layout_id: str) -> str | None:
 
 
 preview_lib.LAYOUT_RESOLVER = _resolve_layout
+
+
+def _assemble_show(deck: Path, slides_dir: str, css_rel: str | None, extra_css: str) -> str | None:
+    page, _issues, _note = build_lib.assemble(deck, slides_dir, css_rel, base_href="/", extra_css=extra_css)
+    return page
+
+
+preview_lib.SHOW_ASSEMBLER = _assemble_show
 
 _PROXY_HEADER = "X-KiroCrew-Proxy"
 _MAX_SKEW_SECONDS = 60
@@ -312,7 +320,7 @@ def route_build_info(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
     if deck is None:
         return 400, {"error": "deck_not_allowed"}
     deck_info = deck_lib.describe_deck(deck, deck)
-    info = build_lib.build_contract(deck, deck_info.get("entry") if deck_info else None)
+    info = build_lib.build_contract(deck, deck_info.get("entry") if deck_info else None, deck_info.get("slidesDir") if deck_info else None)
     info["trusted"] = bool(info["command"]) and build_lib.is_trusted(DATA_DIR, deck, info["command"])
     return 200, info
 
@@ -331,7 +339,7 @@ def route_build_adopt(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
             return 404, {"error": "no_script"}
     except OSError as exc:
         return 500, {"error": "write_failed", "detail": str(exc)}
-    info = build_lib.build_contract(deck, deck_info.get("entry"))
+    info = build_lib.build_contract(deck, deck_info.get("entry"), deck_info.get("slidesDir"))
     info["trusted"] = bool(info["command"]) and build_lib.is_trusted(DATA_DIR, deck, info["command"])
     return 200, info
 
@@ -358,7 +366,7 @@ def route_build(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
     info = deck_lib.describe_deck(deck, deck)
     if info is None:
         return 404, {"error": "not_a_deck"}
-    contract = build_lib.build_contract(deck, info.get("entry"))
+    contract = build_lib.build_contract(deck, info.get("entry"), info.get("slidesDir"))
     command = contract["command"]
     if command:
         if body.get("trust"):
@@ -538,7 +546,7 @@ def route_source_put(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
 def _maybe_rebuild(deck: Path, info: dict[str, Any], result: dict[str, Any]) -> None:
     """After an edit: rebuild a deck whose output exists, unless its external
     command still needs consent. The outcome goes into ``result["rebuild"]``."""
-    contract = build_lib.build_contract(deck, info.get("entry"))
+    contract = build_lib.build_contract(deck, info.get("entry"), info.get("slidesDir"))
     if not contract["outputExists"]:
         return
     if contract["command"]:
@@ -857,15 +865,19 @@ def route_pins_dismiss(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
 
 # --- present / pdf --------------------------------------------------------
 def _output_url(deck: Path) -> tuple[str, str] | None:
-    """(preview base url, output rel) for a deck whose output exists; None otherwise."""
+    """(preview base url, path of the show) for a deck.
+
+    A deck built by an external command shows its output (None until it exists);
+    every other deck shows the live ``/show`` page assembled from the current files.
+    """
     info = deck_lib.describe_deck(deck, deck)
     if info is None:
         return None
-    contract = build_lib.build_contract(deck, info.get("entry"))
-    if not contract["outputExists"]:
+    contract = build_lib.build_contract(deck, info.get("entry"), info.get("slidesDir"))
+    if contract["command"] and not contract["outputExists"]:
         return None
     p = PREVIEWS.ensure(deck, info["slidesDir"], _deck_css(deck), extra_files=(contract["output"],), entry=info.get("entry"))
-    return f"http://127.0.0.1:{p.port}", contract["output"]
+    return f"http://127.0.0.1:{p.port}", (contract["output"] if contract["command"] else "show")
 
 
 def route_present(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:

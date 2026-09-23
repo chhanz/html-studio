@@ -195,6 +195,18 @@ test('external build: an undeclared rebuild.sh is offered, adopting it asks for 
   await expect(page.getByRole('status').filter({ hasText: /Build succeeded/ })).toBeVisible({ timeout: 15_000 })
   const built = await (await page.request.get(`/__ctl/read?path=${encodeURIComponent(`${home}/decks/acme-quarterly/out/index.html`)}`)).text()
   expect(built).toContain('Acme Quarterly Review 2')
+
+  // An edit made outside the studio leaves the output behind: the studio says so
+  // (the show of an externally built deck IS the output) and offers the build.
+  await expect(page.getByTestId('build-stale-notice')).toHaveCount(0)
+  const agenda = `${home}/decks/acme-quarterly/slides/020_agenda.html`
+  const src = await (await page.request.get(`/__ctl/read?path=${encodeURIComponent(agenda)}`)).text()
+  await page.request.post('/__ctl/write', { data: { path: agenda, text: src.replace('Agenda', 'Agenda, later') } })
+  const stale = page.getByTestId('build-stale-notice')
+  await expect(stale).toBeVisible({ timeout: 10_000 })
+  await stale.getByRole('button', { name: /^Build$/ }).click()
+  await expect(stale).toHaveCount(0, { timeout: 15_000 })
+  await expect(page.getByRole('status').filter({ hasText: /Build succeeded/ })).toBeVisible()
 })
 
 test('a deck shaped like the real ones: own stylesheet, SVG assets, hand-numbered files with gaps, tokens layered under the deck CSS, a swap renames one file', async ({ page }) => {
@@ -266,13 +278,13 @@ test('single-file deck: previews sections, build is disabled with a hint', async
   await expect(page.getByRole('group', { name: /^View$/ })).toBeVisible()
 })
 
-test('present opens an in-app presenter at the current slide', async ({ page }) => {
+test('present opens an in-app presenter at the current slide, live from the slide files (no build)', async ({ page }) => {
   await openApp(page)
   await addFixtureRoot(page)
   await selectDeck(page, 'acme-quarterly')
-  await page.getByRole('button', { name: /^Build$/ }).click()
-  await expect(page.getByRole('status').filter({ hasText: /Build succeeded/ })).toBeVisible()
-  await page.getByRole('group', { name: /^View$/ }).getByRole('button', { name: /^Slides$/ }).click()
+  const home = await fakeHome(page)
+  // No build has run: the show is assembled live from the current files.
+  expect((await page.request.get(`/__ctl/read?path=${encodeURIComponent(`${home}/decks/acme-quarterly/out/index.html`)}`)).ok()).toBeFalsy()
   await page.keyboard.press('ArrowRight')
   await page.keyboard.press('ArrowRight')
   await expect(page.getByText('3 / 4')).toBeVisible()
@@ -315,9 +327,16 @@ test('present opens an in-app presenter at the current slide', async ({ page }) 
   await page.keyboard.press('Escape')
   await expect(dialog).toHaveCount(0)
 
-  // Presenting again works after a close.
+  // Presenting again works after a close, and an edit made outside the studio
+  // is in the show at once: the show, the presenter and the viewer share one source.
+  const uptime = `${home}/decks/acme-quarterly/slides/030_uptime.html`
+  const src = await (await page.request.get(`/__ctl/read?path=${encodeURIComponent(uptime)}`)).text()
+  await page.request.post('/__ctl/write', { data: { path: uptime, text: src.replace('<h2>Uptime</h2>', '<h2>Uptime, live</h2>') } })
   await page.getByRole('button', { name: /^Present$/ }).click()
   await expect(dialog).toBeVisible()
+  await expect(frame.locator('#hs-counter')).toHaveText('4 / 4')
+  await page.keyboard.press('ArrowLeft')
+  await expect(frame.locator('.slide.active h2')).toHaveText('Uptime, live')
   await page.keyboard.press('Escape')
   await expect(dialog).toHaveCount(0)
 })

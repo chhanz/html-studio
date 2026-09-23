@@ -25,6 +25,8 @@ export function usePreview({ client, selected, setDecks, onExternalChange }: Arg
   const [reloadKey, setReloadKey] = useState(0)
   const bumpReload = useCallback(() => setReloadKey((k) => k + 1), [])
   const [viewMode, setViewMode] = useState<ViewMode>('slides')
+  // Counts the times the deck was seen to change on disk outside the studio.
+  const [externalChanges, setExternalChanges] = useState(0)
   // Code editor drafts (unsaved text per slide), kept across slide and view switches.
   const draftsRef = useRef<Drafts>(new Map())
   // Output view: the frame follows `current` through its hash (src={url#N}); the
@@ -78,6 +80,7 @@ export function usePreview({ client, selected, setDecks, onExternalChange }: Arg
       if (slidesChanged || touched || p.css !== preview.css) {
         setPreview(p)
         setReloadKey((k) => k + 1)
+        setExternalChanges((n) => n + 1)
         onExternalChange()
         if (slidesChanged) {
           setDecks((ds) => ds.map((d) => (d.id === selected.id ? { ...d, slideCount: p.slides.length, slides: p.slides } : d)))
@@ -107,6 +110,7 @@ export function usePreview({ client, selected, setDecks, onExternalChange }: Arg
     bumpReload,
     viewMode,
     setViewMode,
+    externalChanges,
     draftsRef,
     outputFrameRef,
     syncDeck,

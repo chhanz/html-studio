@@ -36,6 +36,8 @@ export type BuildInfo = {
   command: string | null
   output: string
   outputExists: boolean
+  /** A source file is newer than the output (external build commands only). */
+  outputStale?: boolean
   builtin: boolean
   buildable: boolean
   singleFile: boolean

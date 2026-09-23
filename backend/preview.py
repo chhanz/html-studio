@@ -227,6 +227,9 @@ def inject_present_helper(page: str) -> str:
 # servers stay deck-only otherwise; layouts are the one thing they show from
 # outside the deck, with the deck's own stylesheet.
 LAYOUT_RESOLVER: "Callable[[str], str | None] | None" = None
+# Installed by the server: assembles the deck's current slides into one
+# presentation page (the built-in assembler, in memory). Serves ``/show``.
+SHOW_ASSEMBLER: "Callable[[Path, str, str | None, str], str | None] | None" = None
 
 
 class PresentState:
@@ -511,6 +514,15 @@ class DeckPreview:
             f"<body class=\"hs-print stage\">{body}</body></html>"
         )
 
+    def render_show(self) -> str | None:
+        """The presentation page for the current files (see SHOW_ASSEMBLER).
+        A single-file deck's entry is already that page."""
+        if self.entry:
+            return self._entry_text()
+        if SHOW_ASSEMBLER is None:
+            return None
+        return SHOW_ASSEMBLER(self.deck_dir, self.slides_dir, self.css_rel, self.overrides_css)
+
     def _css_href(self) -> str | None:
         return f"/{self.css_rel}" if self.css_rel and (self.deck_dir / self.css_rel).is_file() else None
 
@@ -615,6 +627,15 @@ class DeckPreview:
             return _send(h, 200, check_document(self.slide_count()).encode("utf-8"), "text/html; charset=utf-8")
         if path == "/print":
             return _send(h, 200, self.render_print().encode("utf-8"), "text/html; charset=utf-8")
+        if path == "/show":
+            # The live show: the deck as the built-in assembler would build it right
+            # now, from the current files, so the show never lags behind an edit.
+            page = self.render_show()
+            if page is None:
+                return _send(h, 404, b"nothing to show", "text/plain")
+            if "present" in parse_qs(url.query).get("hs", []):
+                page = inject_present_helper(page)
+            return _send(h, 200, page.encode("utf-8"), "text/html; charset=utf-8")
         if path.startswith("/slide/"):
             try:
                 idx = int(path[len("/slide/"):])

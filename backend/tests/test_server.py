@@ -116,7 +116,7 @@ class ServerTest(unittest.TestCase):
         code, data = self.request("GET", "/api/status", signed=True)
         self.assertEqual(code, 200)
         self.assertEqual(data["app"], "html-studio")
-        self.assertEqual(data["version"], "0.1.33")
+        self.assertEqual(data["version"], "0.1.34")
         self.assertTrue(data["dataDir"].startswith(self.tmp.name))
 
     def test_signed_unknown_route_is_404(self) -> None:
@@ -516,8 +516,34 @@ class ServerTest(unittest.TestCase):
             (deck / "slides" / "010.html").write_text("<section class='slide'>x</section>")
             self.request("POST", "/api/roots/add", signed=True, body=json.dumps({"path": root}).encode())
             body = json.dumps({"path": str(deck)}).encode()
+            # A built-in deck needs no build to present: the show is the live /show
+            # page, assembled from the current files by the preview server.
+            code, data = self.request("POST", "/api/present", signed=True, body=json.dumps({"path": str(deck), "slide": 1, "mode": "url"}).encode())
+            self.assertEqual(code, 200, data)
+            self.assertTrue(data["url"].endswith("/show#1"), data)
+            page = urllib.request.urlopen(data["url"].split("#")[0] + "?hs=present", timeout=5).read().decode()
+            self.assertIn("<section class='slide'>x</section>", page)
+            self.assertIn("--hs-fg:#1f2430", page)   # default theme, same as the preview
+            self.assertIn("hs-counter", page)         # the runtime the presenter drives
+            self.assertIn("kind:'img'", page)         # present helper injected
+            (deck / "slides" / "010.html").write_text("<section class='slide'>edited</section>")
+            page = urllib.request.urlopen(data["url"].split("#")[0], timeout=5).read().decode()
+            self.assertIn(">edited<", page)           # live: no rebuild between edit and show
+            # A deck with an external build command shows its output, which must exist.
+            (deck / "studio.json").write_text(json.dumps({"build": "true"}))
             code, data = self.request("POST", "/api/present", signed=True, body=body)
             self.assertEqual((code, data["error"]), (409, "no_output"))
+            code, info = self.request("POST", "/api/build/info", signed=True, body=body)
+            self.assertEqual((info["outputExists"], info["outputStale"]), (False, False))
+            (deck / "out").mkdir()
+            (deck / "out" / "index.html").write_text("<html>built</html>")
+            code, info = self.request("POST", "/api/build/info", signed=True, body=body)
+            self.assertEqual((info["outputExists"], info["outputStale"]), (True, False))
+            time.sleep(0.6)
+            (deck / "slides" / "010.html").write_text("<section class='slide'>newer</section>")
+            code, info = self.request("POST", "/api/build/info", signed=True, body=body)
+            self.assertEqual((info["outputExists"], info["outputStale"]), (True, True), info)
+            (deck / "studio.json").unlink()
             # PDF no longer needs a build: it renders the preview's /print document.
             code, data = self.request("POST", "/api/pdf", signed=True, body=body)
             if code == 200:

@@ -208,6 +208,10 @@ const server = createServer(async (req, res) => {
         return res.end('outside fake home')
       }
       if (p === '/__ctl/write') writeFileSync(target, JSON.parse(body.toString('utf-8')).text)
+      if (p === '/__ctl/read' && !existsSync(target)) {
+        res.writeHead(404)
+        return res.end('no such file')
+      }
       res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' })
       return res.end(p === '/__ctl/read' ? readFileSync(target, 'utf-8') : 'written')
     }

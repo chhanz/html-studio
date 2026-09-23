@@ -72,7 +72,7 @@
   "error.path_required": "Enter a path.",
   "error.unknown_route": "The running backend is older than the app UI. Turn the app off and on in the App Store to restart it.",
   "present.hint": "Present full-screen from the current slide; the presenter window opens in your browser",
-  "present.need_output": "Build the deck first",
+  "present.need_output": "Build the deck first: this deck is built by its own command, and the show is its output",
   "pdf.hint": "Export every slide to PDF (one slide per page)",
   "pdf.done": "PDF saved ({kb} KB)",
   "pdf.reveal": "Show in folder",
@@ -296,5 +296,6 @@
   "roots.hint": "Every subfolder with a slides/ directory or a studio.json is listed as a deck.",
   "build.script.found": "This deck has {script}. Build with it ({command}) instead of the built-in assembler?",
   "build.script.use": "Use {script}",
-  "build.script.ignore": "Keep built-in"
+  "build.script.ignore": "Keep built-in",
+  "build.stale": "Slides changed since the last build. The show and the output view still show the old build."
 }

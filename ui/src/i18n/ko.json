@@ -72,7 +72,7 @@
   "error.path_required": "경로를 입력하세요.",
   "error.unknown_route": "실행 중인 백엔드가 앱 UI보다 오래된 버전입니다. App Store에서 앱을 끄고 다시 켜 백엔드를 재시작하세요.",
   "present.hint": "현재 슬라이드부터 전체화면 발표. 발표자 창이 브라우저로 함께 열립니다",
-  "present.need_output": "먼저 덱을 빌드하세요",
+  "present.need_output": "먼저 빌드하세요. 이 덱은 자체 빌드 명령으로 만들어지고, 발표 화면은 그 산출물입니다",
   "pdf.hint": "모든 슬라이드를 PDF로 내보내기(슬라이드 1장 = 1페이지)",
   "pdf.done": "PDF 저장됨 ({kb} KB)",
   "pdf.reveal": "폴더에서 보기",
@@ -296,5 +296,6 @@
   "roots.hint": "slides/ 폴더나 studio.json이 있는 하위 폴더가 덱으로 나열됩니다.",
   "build.script.found": "이 덱에 {script}가 있습니다. 내장 조립기 대신 이 스크립트({command})로 빌드할까요?",
   "build.script.use": "{script} 사용",
-  "build.script.ignore": "내장 조립기 유지"
+  "build.script.ignore": "내장 조립기 유지",
+  "build.stale": "마지막 빌드 뒤에 슬라이드가 바뀌었습니다. 발표 화면과 산출물 보기는 아직 이전 빌드입니다."
 }

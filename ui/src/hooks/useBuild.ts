@@ -8,6 +8,8 @@ type Args = {
   client: Client
   selected: Deck | null
   preview: PreviewInfo | null
+  /** Bumped when the deck changed on disk outside the studio: build info is re-read (the output may be stale). */
+  externalChanges: number
   t: T
   setViewMode: (m: ViewMode) => void
   setCurrent: (i: number) => void
@@ -19,7 +21,7 @@ type Args = {
  * one-time consent for an external command, the result banner, and the offer
  * to adopt a build script found in the deck root.
  */
-export function useBuild({ client, selected, preview, t, setViewMode, setCurrent, bumpReload }: Args) {
+export function useBuild({ client, selected, preview, externalChanges, t, setViewMode, setCurrent, bumpReload }: Args) {
   const [buildInfo, setBuildInfo] = useState<BuildInfo | null>(null)
   const [building, setBuilding] = useState(false)
   const [buildResult, setBuildResult] = useState<BuildResult | null>(null)
@@ -53,6 +55,10 @@ export function useBuild({ client, selected, preview, t, setViewMode, setCurrent
       alive = false
     }
   }, [client, selected?.path]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!selected || !externalChanges) return
+    void client.buildInfo(selected.path).then(setBuildInfo).catch(() => undefined)
+  }, [client, selected?.path, externalChanges]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /**
    * Resolve a build answer to its result. A built-in build answers at once; an
@@ -145,6 +151,15 @@ export function useBuild({ client, selected, preview, t, setViewMode, setCurrent
   }
 
   const outputUrl = preview && buildInfo?.outputExists ? `${preview.baseUrl}/${buildInfo.output}` : null
+  /**
+   * What Present shows. A deck built by an external command shows its output
+   * (the command's result is the real deck); every other deck shows the live
+   * /show page the preview server assembles from the current files, so the
+   * show, the presenter window and the viewer always agree and no build is needed.
+   */
+  const showUrl = !preview || !buildInfo || preview.slides.length === 0 ? null : buildInfo.command ? outputUrl : `${preview.baseUrl}/show`
+  /** External build whose output predates a source file: the show is behind the slides. */
+  const outputStale = !!(buildInfo?.command && buildInfo.outputExists && buildInfo.outputStale)
   const canBuild = !!selected && !!preview && preview.slides.length > 0 && !building && (buildInfo?.buildable ?? false)
   const buildHint = !selected
     ? ''
@@ -170,6 +185,8 @@ export function useBuild({ client, selected, preview, t, setViewMode, setCurrent
     scriptOffer,
     openIssue,
     outputUrl,
+    showUrl,
+    outputStale,
     canBuild,
     buildHint,
   }

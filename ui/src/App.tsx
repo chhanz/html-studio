@@ -53,15 +53,15 @@ export default function HtmlStudio() {
   const [sidebarOpen, setSidebarOpen] = useCollapsed('sidebar', true)
 
   const notes = useNotes(selected?.path)
-  const { preview, setPreview, previewError, setPreviewError, current, setCurrent, reloadKey, bumpReload, viewMode, setViewMode, draftsRef, outputFrameRef, syncDeck } = usePreview({
+  const { preview, setPreview, previewError, setPreviewError, current, setCurrent, reloadKey, bumpReload, viewMode, setViewMode, externalChanges, draftsRef, outputFrameRef, syncDeck } = usePreview({
     client,
     selected,
     setDecks,
     onExternalChange: notes.invalidate,
   })
 
-  const build = useBuild({ client, selected, preview, t, setViewMode, setCurrent, bumpReload })
-  const { buildInfo, building, buildResult, pendingCommand, runBuild, showRebuild, outputUrl, canBuild, buildHint } = build
+  const build = useBuild({ client, selected, preview, externalChanges, t, setViewMode, setCurrent, bumpReload })
+  const { buildInfo, building, buildResult, pendingCommand, runBuild, showRebuild, outputUrl, showUrl, canBuild, buildHint } = build
 
   const chat = useDeckChat({ api, selected, preview, buildInfo, current, locale, t, bumpReload, bumpNotes: notes.bump })
   const pins = usePins({ client, selected, preview, current, locale, setCurrent, setViewMode, bumpReload, postToChat: chat.post, bumpChat: chat.bumpChat })
@@ -85,9 +85,9 @@ export default function HtmlStudio() {
 
   const [presenting, setPresenting] = useState(false)
   const present = useCallback(() => {
-    if (!selected || !outputUrl) return
+    if (!selected || !showUrl) return
     setPresenting(true)
-  }, [selected, outputUrl])
+  }, [selected, showUrl])
 
   // New deck wizard. After creation the deck is selected; optionally the deck
   // chat opens with the wizard's answers and asks for an outline.
@@ -362,7 +362,7 @@ export default function HtmlStudio() {
                 {pdf?.state === 'running' && <Spinner />}
                 {t('toolbar.pdf')}
               </SmallBtn>
-              <SmallBtn active onClick={present} disabled={!outputUrl} title={outputUrl ? t('present.hint') : t('present.need_output')}>
+              <SmallBtn active onClick={present} disabled={!showUrl} title={showUrl ? t('present.hint') : t('present.need_output')}>
                 {t('toolbar.present')}
               </SmallBtn>
               </div>
@@ -411,6 +411,15 @@ export default function HtmlStudio() {
               onFixAll={check.fixAllIssues}
               onClose={() => check.setCheckResult(null)}
             />
+          )}
+          {selected && build.outputStale && (
+            <div className="mb-2 flex-none rounded-md border p-2 text-[12px] flex flex-wrap items-center gap-2" style={{ borderColor: 'var(--warn)' }} role="status" data-testid="build-stale-notice">
+              <span className="flex-1 min-w-0">{t('build.stale')}</span>
+              <SmallBtn active onClick={() => runBuild(false)} disabled={!canBuild} className="inline-flex items-center gap-1.5">
+                {building && <Spinner />}
+                {t('toolbar.build')}
+              </SmallBtn>
+            </div>
           )}
           {selected && build.scriptOffer && (
             <div className="mb-2 flex-none rounded-md border p-3 text-[13px] flex flex-wrap items-center gap-2" style={{ borderColor: 'var(--border)' }} role="status" data-testid="build-script-notice">
@@ -628,10 +637,10 @@ export default function HtmlStudio() {
         </div>
         </div>
       </div>
-      {presenting && selected && outputUrl && preview && (
+      {presenting && selected && showUrl && preview && (
         <Presenter
           t={t}
-          url={outputUrl}
+          url={showUrl}
           baseUrl={preview.baseUrl}
           startSlide={current + 1}
           slideCount={preview.slides.length}

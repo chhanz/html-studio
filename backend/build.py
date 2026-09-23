@@ -41,11 +41,33 @@ class BuildError(ValueError):
 
 
 # ------------------------------------------------------------- contract
-def build_contract(deck: Path, entry: str | None = None) -> dict[str, Any]:
+def newest_source_mtime(deck: Path, slides_dir: str | None) -> float:
+    """The newest mtime among the files a build reads: the slides, the deck's
+    root-level files (css, tokens, DESIGN.md, studio.json) and ``assets/``."""
+    newest = 0.0
+    scan: list[Path] = [deck]
+    if slides_dir and (deck / slides_dir).is_dir():
+        scan.append(deck / slides_dir)
+    if (deck / "assets").is_dir():
+        scan.append(deck / "assets")
+    for folder in scan:
+        try:
+            for entry in os.scandir(folder):
+                if entry.name.startswith(".") or not entry.is_file(follow_symlinks=False):
+                    continue
+                newest = max(newest, entry.stat().st_mtime)
+        except OSError:
+            continue
+    return newest
+
+
+def build_contract(deck: Path, entry: str | None = None, slides_dir: str | None = None) -> dict[str, Any]:
     """Resolve build settings for *deck* from studio.json + defaults.
 
     For a single-file deck (``entry`` set) with no declared command the file IS
-    the output: nothing to assemble, so ``buildable`` is False.
+    the output: nothing to assemble, so ``buildable`` is False. ``outputStale``
+    says a source file is newer than the output (only meaningful when the
+    output exists and a command produced it; the built-in show is always live).
     """
     studio = deck_lib._read_studio(deck) or {}
     command = studio.get("build")
@@ -56,10 +78,18 @@ def build_contract(deck: Path, entry: str | None = None) -> dict[str, Any]:
         output = entry or DEFAULT_OUTPUT
     builtin = command is None and entry is None
     script = find_build_script(deck) if command is None else None
+    output_exists = (deck / output).is_file()
+    stale = False
+    if output_exists and command is not None:
+        try:
+            stale = newest_source_mtime(deck, slides_dir) > (deck / output).stat().st_mtime + 0.5
+        except OSError:
+            stale = False
     return {
         "command": command,
         "output": output,
-        "outputExists": (deck / output).is_file(),
+        "outputExists": output_exists,
+        "outputStale": stale,
         "builtin": builtin,
         "buildable": command is not None or builtin,
         "singleFile": entry is not None,
@@ -206,18 +236,25 @@ def _strip_active(fragment: str) -> str:
     return _CLASS_RE.sub(repl, fragment)
 
 
-def run_builtin(deck: Path, slides_dir: str, output: str, css_rel: str | None = None) -> dict[str, Any]:
-    """Assemble slides into one page with the deck's stylesheet (or the default theme) and a tiny runtime.
+def assemble(deck: Path, slides_dir: str, css_rel: str | None = None, *, base_href: str = "/", extra_css: str = "") -> tuple[str | None, list[dict[str, str]], str]:
+    """Assemble the slide files into one presentation page (no file is written).
 
-    ``css_rel`` is a deck-relative stylesheet (e.g. ``assets/deck.css``). The
-    output lives in a subfolder, so a ``<base>`` pointing at the deck root keeps
-    the slides' relative ``img/...`` references and the stylesheet's ``url()``s working.
+    Returns ``(page, issues, note)``: ``page`` is None when there is nothing to
+    assemble or a slide fails validation (then ``issues`` / ``note`` say why).
+    ``base_href`` is where the page will live relative to the deck root
+    (``"/"`` when served from the preview server's root, ``"../"`` for ``out/``),
+    so the slides' relative ``img/...`` references and the stylesheet's ``url()``s
+    keep working. ``extra_css`` is appended (the theme panel's live overrides).
+
+    Stylesheets come in the same order the preview uses (preview.wrap_slide):
+    with a deck stylesheet, tokens.css (if any) first so the deck css can read
+    its variables, then the deck css and no default theme; with tokens.css
+    only, the default theme first and tokens.css after it so its ``--hs-*``
+    hooks win; with nothing, the default theme.
     """
-    started = time.monotonic()
     slides = sorted(p for p in (deck / slides_dir).glob("*.html") if p.is_file())
     if not slides:
-        return {"ok": False, "mode": "builtin", "exitCode": 1, "output": None, "durationMs": 0,
-                "issues": [], "stdout": "", "stderr": "no slide files found"}
+        return None, [], "no slide files found"
     issues: list[dict[str, str]] = []
     parts: list[str] = []
     for p in slides:
@@ -227,18 +264,7 @@ def run_builtin(deck: Path, slides_dir: str, output: str, css_rel: str | None = 
             issues.append({"file": p.name, "message": f"expected exactly 1 <section>, found {n}"})
         parts.append(_strip_active(frag).rstrip())
     if issues:
-        return {"ok": False, "mode": "builtin", "exitCode": 1, "output": None,
-                "durationMs": int((time.monotonic() - started) * 1000), "issues": issues,
-                "stdout": "", "stderr": "slide validation failed"}
-    target = deck / output
-    depth = len(Path(output).parent.parts)
-    base_href = "../" * depth if depth else "./"
-    # Stylesheets, in the same order the preview uses (preview.wrap_slide):
-    # - deck stylesheet: tokens.css (if any) first so the deck css can read its
-    #   variables, then the deck css; no default theme.
-    # - tokens.css only: the default theme first, then tokens.css so its --hs-*
-    #   hooks override the theme's defaults.
-    # - nothing: the default theme.
+        return None, issues, "slide validation failed"
     theme = ""
     if css_rel and (deck / css_rel).is_file():
         link = f'<link rel="stylesheet" href="{html.escape(css_rel, quote=True)}">'
@@ -250,6 +276,7 @@ def run_builtin(deck: Path, slides_dir: str, output: str, css_rel: str | None = 
             theme = link
     else:
         theme = f"<style>{preview_lib.default_theme_css()}</style>"
+    extra = f"<style>{extra_css}</style>" if extra_css else ""
     body = "\n".join(parts)
     page = (
         '<!doctype html><html><head><meta charset="utf-8">'
@@ -267,16 +294,28 @@ def run_builtin(deck: Path, slides_dir: str, output: str, css_rel: str | None = 
         ".hs-stage>.slide{display:flex!important;position:relative!important;inset:auto!important;width:1280px;height:720px;"
         "break-after:page;page-break-after:always;break-inside:avoid;animation:none!important}"
         ".hs-stage>.slide:last-child{break-after:auto;page-break-after:auto}"
-        "#hs-counter{display:none!important}}</style></head>"
+        "#hs-counter{display:none!important}}</style>" + extra + "</head>"
         # `.stage` alias: deck stylesheets commonly scope their own print rules to it.
         f'<body><div class="hs-stage stage">{body}</div><div id="hs-counter"></div>'
         f"<script>{_RUNTIME_JS}</script></body></html>"
     )
+    return page, [], f"assembled {len(slides)} slides"
+
+
+def run_builtin(deck: Path, slides_dir: str, output: str, css_rel: str | None = None) -> dict[str, Any]:
+    """Write the assembled deck (see ``assemble``) to ``output`` inside the deck."""
+    started = time.monotonic()
+    depth = len(Path(output).parent.parts)
+    page, issues, note = assemble(deck, slides_dir, css_rel, base_href="../" * depth if depth else "./")
+    duration = int((time.monotonic() - started) * 1000)
+    if page is None:
+        return {"ok": False, "mode": "builtin", "exitCode": 1, "output": None, "durationMs": duration,
+                "issues": issues, "stdout": "", "stderr": note}
+    target = deck / output
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(page, encoding="utf-8")
     return {"ok": True, "mode": "builtin", "exitCode": 0, "output": output,
-            "durationMs": int((time.monotonic() - started) * 1000), "issues": [],
-            "stdout": f"assembled {len(slides)} slides into {output}", "stderr": ""}
+            "durationMs": duration, "issues": [], "stdout": f"{note} into {output}", "stderr": ""}
 
 
 def build(
