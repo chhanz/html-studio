@@ -7,9 +7,12 @@ type Props = {
   current: number
   onSelect: (index: number) => void
   reloadKey?: number
+  /** Slide names that have a speaker note (marker on the thumbnail). */
+  withNotes?: Set<string>
+  notesLabel?: string
 }
 
-export function SlideStrip({ preview, current, onSelect, reloadKey }: Props) {
+export function SlideStrip({ preview, current, onSelect, reloadKey, withNotes, notesLabel = 'Has notes' }: Props) {
   const listRef = useRef<HTMLOListElement>(null)
 
   // Keep the selected thumbnail in view when navigating with the keyboard.
@@ -48,6 +51,11 @@ export function SlideStrip({ preview, current, onSelect, reloadKey }: Props) {
                   {i + 1}
                 </span>
                 <span className="truncate">{name}</span>
+                {withNotes?.has(name) && (
+                  <span className="ml-auto flex-none" title={notesLabel} aria-label={notesLabel} data-testid="strip-note" style={{ color: 'var(--accent)' }}>
+                    ≡
+                  </span>
+                )}
               </div>
             </button>
           </li>

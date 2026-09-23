@@ -35,6 +35,7 @@ import build as build_lib  # noqa: E402
 import design as design_lib  # noqa: E402
 import pinqueue as queue_lib  # noqa: E402
 import check as check_lib  # noqa: E402
+import notes as notes_lib  # noqa: E402
 import export as export_lib  # noqa: E402
 
 PDF_JOBS = export_lib.ExportJobs()
@@ -43,7 +44,7 @@ CHECK_JOBS = check_lib.CheckJobs()
 PREVIEWS = preview_lib.PreviewRegistry()
 
 APP_NAME = os.environ.get("KIROCREW_APP_NAME", "html-studio")
-APP_VERSION = "0.1.16"
+APP_VERSION = "0.1.17"
 PORT = int(os.environ.get("PORT", "9100"))
 HOME = Path(os.environ.get("KIROCREW_HOME", str(Path.home() / ".kiro" / "crew")))
 DATA_DIR = HOME / "apps" / APP_NAME / "data"
@@ -372,6 +373,55 @@ def route_design_tokens(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
     return 200, _design_payload(deck)
 
 
+# --- speaker notes (notes/<slide>.md sidecars) ------------------------------
+def _slide_names_for(deck: Path) -> list[str] | None:
+    info = deck_lib.describe_deck(deck, deck)
+    return None if info is None else list(info["slides"])
+
+
+def route_notes_list(h: "Handler", _body: dict[str, Any]) -> tuple[int, Any]:
+    """GET /notes?path=<deck>: slides that have notes, and orphan notes."""
+    deck = _deck_under_roots(parse_qs(urlsplit(h.path).query).get("path", [""])[0])
+    if deck is None:
+        return 400, {"error": "deck_not_allowed"}
+    slides = _slide_names_for(deck)
+    if slides is None:
+        return 409, {"error": "not_a_deck"}
+    return 200, notes_lib.list_notes(deck, slides)
+
+
+def route_note_get(h: "Handler", _body: dict[str, Any]) -> tuple[int, Any]:
+    """GET /note?path=<deck>&slide=<name>: the note text ('' if none)."""
+    q = parse_qs(urlsplit(h.path).query)
+    deck = _deck_under_roots(q.get("path", [""])[0])
+    slide = q.get("slide", [""])[0]
+    if deck is None:
+        return 400, {"error": "deck_not_allowed"}
+    slides = _slide_names_for(deck)
+    if slides is None or slide not in slides:
+        return 404, {"error": "unknown_slide"}
+    return 200, {"slide": slide, "file": f"{notes_lib.NOTES_DIR}/{notes_lib.note_name(slide)}", "text": notes_lib.read_note(deck, slide)}
+
+
+def route_note_put(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
+    """POST /note {path, slide, text}: write (or remove when empty) the slide's note."""
+    deck = _deck_under_roots(str(body.get("path", "")))
+    slide = str(body.get("slide", ""))
+    text = body.get("text", "")
+    if deck is None:
+        return 400, {"error": "deck_not_allowed"}
+    if not isinstance(text, str) or len(text) > 200_000:
+        return 400, {"error": "bad_text"}
+    slides = _slide_names_for(deck)
+    if slides is None or slide not in slides:
+        return 404, {"error": "unknown_slide"}
+    try:
+        notes_lib.write_note(deck, slide, text)
+    except OSError as exc:
+        return 500, {"error": "write_failed", "detail": str(exc)}
+    return 200, {"slide": slide, "file": f"{notes_lib.NOTES_DIR}/{notes_lib.note_name(slide)}", "exists": bool(text.strip())}
+
+
 # --- deck check -------------------------------------------------------------
 def route_check_start(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
     """POST /check {path}: run every rule over the deck (async; poll GET /check?id)."""
@@ -581,6 +631,9 @@ ROUTES: dict[tuple[str, str], Route] = {
     ("POST", "/build/info"): route_build_info,
     ("POST", "/build"): route_build,
     ("POST", "/present"): route_present,
+    ("GET", "/notes"): route_notes_list,
+    ("GET", "/note"): route_note_get,
+    ("POST", "/note"): route_note_put,
     ("POST", "/check"): route_check_start,
     ("GET", "/check"): route_check_status,
     ("POST", "/pins/send"): route_pins_send,

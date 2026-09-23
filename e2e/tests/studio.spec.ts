@@ -300,7 +300,7 @@ test('deck chat pane: looks up, starts once, embeds the deck session', async ({ 
 })
 
 test('viewer fits its box at any chat size; the splitter resizes and persists', async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 720 })
+  await page.setViewportSize({ width: 1280, height: 900 }) // room for preview + notes header + chat
   await openApp(page)
   await addFixtureRoot(page)
   await selectDeck(page, 'acme-quarterly')
@@ -596,4 +596,52 @@ test('quick action chips send a prompt about the current slide to the deck chat'
   const last = chat.log.filter((l: any) => l.path.startsWith('/api/chat?')).at(-1)
   expect(last.body.message).toContain('Follow DESIGN.md / tokens.css')
   expect(last.body.message).toContain('No em/en dashes or middle dots')
+})
+
+test('speaker notes: autosaves notes/<slide>.md, marks the thumbnail, survives reload, empty text removes the file', async ({ page }) => {
+  await openApp(page)
+  await addFixtureRoot(page)
+  await selectDeck(page, 'acme-quarterly')
+  const home = await fakeHome(page)
+  const deckPath = `${home}/decks/acme-quarterly`
+  const header = page.getByRole('button', { name: /^Notes for slide 1/ })
+  await expect(header).toHaveAttribute('aria-expanded', 'false')
+  await expect(header).toContainText('speaker notes')
+  await header.click()
+  const box = page.getByRole('textbox', { name: /Notes for slide 1/ })
+  await expect(box).toBeVisible()
+  await expect(box).toHaveValue('')
+  await expect(header).toContainText('notes/010_cover.md')
+
+  await box.fill('- Welcome everyone\n- Agenda first')
+  const panel = page.getByTestId('notes-panel')
+  await expect(panel).toHaveAttribute('data-save', 'saved', { timeout: 5000 })
+  const note = await (await page.request.get(`/apps/html-studio/api/note?path=${encodeURIComponent(deckPath)}&slide=010_cover.html`)).json()
+  expect(note.text).toBe('- Welcome everyone\n- Agenda first\n')
+  await expect(page.locator('#slides-body li').nth(0).getByTestId('strip-note')).toBeVisible()
+  await expect(page.locator('#slides-body li').nth(1).getByTestId('strip-note')).toHaveCount(0)
+
+  // Another slide has its own (empty) note; coming back restores the text.
+  await page.locator('#slides-body li').nth(1).click()
+  await expect(page.getByRole('textbox', { name: /Notes for slide 2/ })).toHaveValue('')
+  await page.locator('#slides-body li').nth(0).click()
+  await expect(page.getByRole('textbox', { name: /Notes for slide 1/ })).toHaveValue('- Welcome everyone\n- Agenda first\n')
+
+  // Notes never reach the slide or the print document.
+  const slide = await (await page.request.get(`${(await (await page.request.get(`/apps/html-studio/api/preview/start`, { data: { path: deckPath } })).json()).baseUrl}/print`)).text()
+  expect(slide).not.toContain('Welcome everyone')
+
+  // Reload keeps the note and the marker; the pane's open state is remembered.
+  await page.reload()
+  await page.waitForFunction(() => (window as any).__hsReady === true)
+  await selectDeck(page, 'acme-quarterly')
+  await expect(page.getByRole('textbox', { name: /Notes for slide 1/ })).toHaveValue('- Welcome everyone\n- Agenda first\n')
+  await expect(page.locator('#slides-body li').nth(0).getByTestId('strip-note')).toBeVisible()
+
+  // Clearing removes the sidecar file.
+  await page.getByRole('textbox', { name: /Notes for slide 1/ }).fill('')
+  await expect(page.getByTestId('notes-panel')).toHaveAttribute('data-save', 'saved', { timeout: 5000 })
+  const idx = await (await page.request.get(`/apps/html-studio/api/notes?path=${encodeURIComponent(deckPath)}`)).json()
+  expect(idx.withNotes).toEqual([])
+  await expect(page.locator('#slides-body li').nth(0).getByTestId('strip-note')).toHaveCount(0)
 })

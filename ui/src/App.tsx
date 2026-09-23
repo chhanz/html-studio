@@ -1,11 +1,12 @@
 import { useAppApi } from '@kirocrew/app-sdk'
 import { Card, CardTitle, PageHeader } from '@kirocrew/app-sdk/ui'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ApiError, type BackendStatus, type BuildInfo, type BuildResult, type CheckIssue, type CheckJob, type CheckResult, type Deck, type DesignInfo, type PdfJob, type PreviewInfo, makeClient } from './api'
+import { ApiError, type BackendStatus, type BuildInfo, type BuildResult, type CheckIssue, type CheckJob, type CheckResult, type Deck, type DesignInfo, type NotesIndex, type PdfJob, type PreviewInfo, makeClient } from './api'
 import { openDeckChat } from './chat'
 import { BuildPanel } from './components/BuildPanel'
 import { CheckPanel, issueKey } from './components/CheckPanel'
 import { DeckChat } from './components/DeckChat'
+import { NotesPanel } from './components/NotesPanel'
 import { DeckPanel } from './components/DeckPanel'
 import { PinsPanel } from './components/PinsPanel'
 import { Presenter } from './components/Presenter'
@@ -403,10 +404,20 @@ export default function HtmlStudio() {
       setChatRefresh((k) => k + 1)
       setChatOpen(true)
       // Actions that edit files: refresh the preview after a moment so the change shows.
-      if (id === 'tighten' || id === 'draft-next' || id === 'notes') setTimeout(() => setReloadKey((k) => k + 1), 8000)
+      if (id === 'tighten' || id === 'draft-next') setTimeout(() => setReloadKey((k) => k + 1), 8000)
+      if (id === 'notes') setTimeout(() => setNotesRefresh((k) => k + 1), 8000)
     },
     [api, selected, preview, current, locale, buildInfo, t, setChatOpen],
   )
+
+  // P3-5: speaker notes (notes/<slide>.md), edited under the preview.
+  const [notesOpen, setNotesOpen] = useCollapsed('notes', false)
+  const [notesIndex, setNotesIndex] = useState<NotesIndex | null>(null)
+  const [notesRefresh, setNotesRefresh] = useState(0)
+  useEffect(() => {
+    setNotesIndex(null)
+  }, [selected?.path])
+  const withNotes = useMemo(() => new Set(notesIndex?.withNotes ?? []), [notesIndex])
 
   // P1-8: DESIGN.md recognition. Read-only until the user asks for tokens.css.
   const [designInfo, setDesignInfo] = useState<DesignInfo | null>(null)
@@ -712,7 +723,7 @@ export default function HtmlStudio() {
           /* Right column: two cards share the height (inline flex-basis on each wrapper). */
           .hs-grid .hs-right > div > * { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
           .hs-grid .hs-right > div > * > * { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-          .hs-grid .hs-right-chat[style*="0 0 auto"] > * > * { flex: 0 0 auto; }
+          .hs-grid .hs-right-chat[style*="0 0 auto"] > * > *, .hs-grid .hs-right-notes[style*="0 0 auto"] > * > * { flex: 0 0 auto; }
           .hs-grid .hs-fill { flex: 1 1 auto; min-height: 0; }
           .hs-grid .hs-scroll { overflow-y: auto !important; }
           .hs-grid section[data-grow="true"] { flex: 1 1 auto; min-height: 0; }
@@ -765,7 +776,7 @@ export default function HtmlStudio() {
               {selected ? (
                 preview ? (
                   preview.slides.length ? (
-                    <SlideStrip preview={preview} current={current} onSelect={setCurrent} reloadKey={reloadKey} />
+                    <SlideStrip preview={preview} current={current} onSelect={setCurrent} reloadKey={reloadKey} withNotes={withNotes} notesLabel={t('strip.has_notes')} />
                   ) : (
                     <p className="m-0 text-[12px] text-muted">{t('deck.summary.no_slides')}</p>
                   )
@@ -989,6 +1000,25 @@ export default function HtmlStudio() {
           </div>
         </Card>
         </div>
+
+        {/* Speaker notes for the current slide (P3-5) */}
+        {selected && preview && preview.slides[current] && (
+          <div className="hs-right-notes min-h-0 flex flex-col" style={{ flex: notesOpen ? '0 0 22%' : '0 0 auto', marginTop: 12 }}>
+            <Card>
+              <NotesPanel
+                t={t}
+                client={client}
+                deckPath={selected.path}
+                slide={preview.slides[current]}
+                slideNumber={current + 1}
+                open={notesOpen}
+                onToggle={() => setNotesOpen(!notesOpen)}
+                onChanged={setNotesIndex}
+                refreshKey={notesRefresh + reloadKey}
+              />
+            </Card>
+          </div>
+        )}
 
         {/* Splitter: drag to change the preview / chat share (hidden when the chat is collapsed) */}
         {chatOpen ? (

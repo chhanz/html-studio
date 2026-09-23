@@ -115,6 +115,9 @@ export function makeClient(api: AppApi) {
     pdfStart: (path: string) => wrap(api.post<PdfJob>(`${API}/pdf`, { path })),
     pdfStatus: (id: string) => wrap(api.get<PdfJob>(`${API}/pdf?id=${encodeURIComponent(id)}`)),
     reveal: (path: string, file: string) => wrap(api.post<{ revealed: string }>(`${API}/reveal`, { path, file })),
+    notesIndex: (path: string) => wrap(api.get<NotesIndex>(`${API}/notes?path=${encodeURIComponent(path)}`)),
+    noteGet: (path: string, slide: string) => wrap(api.get<Note>(`${API}/note?path=${encodeURIComponent(path)}&slide=${encodeURIComponent(slide)}`)),
+    noteSave: (path: string, slide: string, text: string) => wrap(api.post<{ slide: string; file: string; exists: boolean }>(`${API}/note`, { path, slide, text })),
     checkStart: (path: string) => wrap(api.post<CheckJob>(`${API}/check`, { path })),
     checkStatus: (id: string) => wrap(api.get<CheckJob>(`${API}/check?id=${encodeURIComponent(id)}`)),
     pinsSend: (path: string, pins: unknown[], language: string) => wrap(api.post<BatchSent>(`${API}/pins/send`, { path, pins, language })),
@@ -177,3 +180,6 @@ export type CheckIssue = {
 }
 export type CheckResult = { issues: CheckIssue[]; counts: Record<string, number>; slides: number; rules: Record<string, CheckSeverity>; disabled: string[] }
 export type CheckJob = { id: string; state: 'running' | 'done' | 'error'; result?: CheckResult; error?: string; detail?: string }
+
+export type NotesIndex = { withNotes: string[]; orphans: string[]; dir: string }
+export type Note = { slide: string; file: string; text: string }

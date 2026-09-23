@@ -173,5 +173,17 @@
   "quick.hint.draft-next": "이 슬라이드 맥락으로 다음 슬라이드 파일 생성",
   "quick.hint.notes": "발표자 노트를 notes/<슬라이드>.md에 작성",
   "quick.hint.check": "이 슬라이드의 표현과 레이아웃 리뷰 (수정 없음)",
-  "quick.hint.tighten": "뜻은 그대로, 문장을 짧게. 슬라이드 파일 수정"
+  "quick.hint.tighten": "뜻은 그대로, 문장을 짧게. 슬라이드 파일 수정",
+  "notes.title": "{n}번 슬라이드 노트",
+  "notes.tagline": "발표자 노트. notes/에 저장되며 슬라이드에는 나타나지 않습니다",
+  "notes.has": "노트 있음",
+  "notes.placeholder": "이 슬라이드에서 말할 내용 (Markdown). 자동 저장됩니다.",
+  "notes.hint": "Markdown. 빌드 결과물과 PDF에는 포함되지 않고 발표자 뷰에 표시됩니다.",
+  "notes.saving": "저장 중",
+  "notes.saved": "저장됨",
+  "notes.unsaved": "저장 안 됨",
+  "notes.save_failed": "저장 실패",
+  "notes.orphans": "슬라이드 없는 노트 {n}개",
+  "notes.show": "보기",
+  "strip.has_notes": "노트 있음"
 }

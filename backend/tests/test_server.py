@@ -106,7 +106,7 @@ class ServerTest(unittest.TestCase):
         code, data = self.request("GET", "/api/status", signed=True)
         self.assertEqual(code, 200)
         self.assertEqual(data["app"], "html-studio")
-        self.assertEqual(data["version"], "0.1.16")
+        self.assertEqual(data["version"], "0.1.17")
         self.assertTrue(data["dataDir"].startswith(self.tmp.name))
 
     def test_signed_unknown_route_is_404(self) -> None:
@@ -273,6 +273,31 @@ class ServerTest(unittest.TestCase):
             self.assertEqual(qd["batches"], [])
             code, data = self.request("POST", "/api/pins/send", signed=True, body=json.dumps({"path": str(deck), "pins": []}).encode())
             self.assertEqual((code, data["error"]), (400, "no_pins"))
+            self.request("POST", "/api/roots/remove", signed=True, body=json.dumps({"path": root}).encode())
+
+    def test_notes_round_trip_and_orphans(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.home()) as root:
+            deck = Path(root) / "deck"
+            (deck / "slides").mkdir(parents=True)
+            (deck / "slides" / "010.html").write_text("<section class='slide'>a</section>")
+            (deck / "slides" / "020.html").write_text("<section class='slide'>b</section>")
+            self.request("POST", "/api/roots/add", signed=True, body=json.dumps({"path": root}).encode())
+            q = "path=" + urllib.parse.quote(str(deck))
+            code, data = self.request("GET", f"/api/notes?{q}", signed=True)
+            self.assertEqual((code, data), (200, {"withNotes": [], "orphans": [], "dir": "notes"}))
+            code, data = self.request("GET", f"/api/note?{q}&slide=010.html", signed=True)
+            self.assertEqual((code, data["text"], data["file"]), (200, "", "notes/010.md"))
+            code, data = self.request("POST", "/api/note", signed=True, body=json.dumps({"path": str(deck), "slide": "010.html", "text": "- hello"}).encode())
+            self.assertEqual((code, data["exists"]), (200, True))
+            self.assertEqual((deck / "notes" / "010.md").read_text(), "- hello\n")
+            (deck / "notes" / "030.md").write_text("orphan")
+            code, data = self.request("GET", f"/api/notes?{q}", signed=True)
+            self.assertEqual((data["withNotes"], data["orphans"]), (["010.html"], ["030.md"]))
+            code, data = self.request("POST", "/api/note", signed=True, body=json.dumps({"path": str(deck), "slide": "nope.html", "text": "x"}).encode())
+            self.assertEqual((code, data["error"]), (404, "unknown_slide"))
+            code, data = self.request("POST", "/api/note", signed=True, body=json.dumps({"path": str(deck), "slide": "010.html", "text": ""}).encode())
+            self.assertEqual((code, data["exists"]), (200, False))
+            self.assertFalse((deck / "notes" / "010.md").exists())
             self.request("POST", "/api/roots/remove", signed=True, body=json.dumps({"path": root}).encode())
 
     def test_check_job_runs_all_rules(self) -> None:

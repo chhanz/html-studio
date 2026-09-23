@@ -173,5 +173,17 @@
   "quick.hint.draft-next": "Create the following slide from this one's context",
   "quick.hint.notes": "Speaker notes into notes/<slide>.md",
   "quick.hint.check": "Wording and layout review of this slide (no edits)",
-  "quick.hint.tighten": "Shorter text, same meaning, edits the slide"
+  "quick.hint.tighten": "Shorter text, same meaning, edits the slide",
+  "notes.title": "Notes for slide {n}",
+  "notes.tagline": "speaker notes, kept in notes/ and never shown on the slide",
+  "notes.has": "has notes",
+  "notes.placeholder": "Talking points for this slide (Markdown). Saved automatically.",
+  "notes.hint": "Markdown. Not included in the built deck or the PDF; shown in the presenter view.",
+  "notes.saving": "Saving",
+  "notes.saved": "Saved",
+  "notes.unsaved": "Unsaved",
+  "notes.save_failed": "Save failed",
+  "notes.orphans": "{n} note(s) without a slide",
+  "notes.show": "Show",
+  "strip.has_notes": "Has notes"
 }
