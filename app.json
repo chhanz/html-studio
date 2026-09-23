@@ -7,6 +7,7 @@
   "license": "Apache-2.0",
   "minKiroCrewVersion": "0.1.0",
   "iconPath": "assets/icon.svg",
+  "heroImage": "assets/hero.webp",
   "tags": [
     "design",
     "presentation",
