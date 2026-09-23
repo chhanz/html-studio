@@ -484,6 +484,14 @@ test('DESIGN.md: theme row shows the design, tokens.css is written on demand and
   const css = await (await page.request.get(`/apps/html-studio/api/design?path=${encodeURIComponent(`${home}/decks/acme-quarterly`)}`)).json()
   expect(css.tokensExists).toBe(true)
   expect(css.css).toBe('tokens.css')
+
+  // The built output (what Present and PDF show) is themed the same way: default theme under tokens.css.
+  await page.getByRole('button', { name: /^Build$/ }).click()
+  await expect(page.getByRole('status').filter({ hasText: /Build succeeded/ })).toBeVisible()
+  const out = page.frameLocator('iframe[title="out/index.html"]')
+  await expect(out.locator('.slide.active h1')).toBeVisible()
+  await expect.poll(() => out.locator('html').evaluate((el) => getComputedStyle(el).getPropertyValue('--hs-accent').trim())).toBe('#0f766e')
+  await expect(out.locator('body')).toHaveCSS('color', 'rgb(17, 17, 17)') // ink from DESIGN.md reaches the text, through the default theme's --hs-fg
 })
 
 test('select-to-edit: clicking an element pins it with file, selector and text; pins persist and re-anchor', async ({ page }) => {

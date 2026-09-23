@@ -543,8 +543,9 @@ export default function HtmlStudio() {
                 tokensBusy={theme.tokensBusy}
                 onWriteTokens={() => void theme.writeTokens()}
                 onPreview={bumpReload}
-                onApplied={() => {
+                onApplied={(rebuild) => {
                   theme.onApplied()
+                  showRebuild(rebuild, selected.path)
                   void refresh()
                 }}
                 onClose={() => setTweakOpen(false)}

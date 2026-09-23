@@ -97,6 +97,32 @@ class RunTests(unittest.TestCase):
         self.assertIn('<base href="../">', page)   # output is one folder deep
         self.assertNotIn("--hs-accent", page)      # no default theme on top
 
+    def test_builtin_keeps_default_theme_under_tokens_css(self) -> None:
+        """A deck with no stylesheet of its own but a tokens.css (from DESIGN.md)
+        is rendered by the default theme with the tokens layered on top, in the
+        built output exactly as in the preview: the theme first, tokens.css after
+        it so its --hs-* hooks win. (Regression: the output dropped the theme.)"""
+        deck = make_deck(self.root / "d", ["<section class='slide'><h1>A</h1></section>"])
+        (deck / "tokens.css").write_text(":root{--color-ink:#0a0;--hs-fg:var(--color-ink)}")
+        r = build.build(self.data, deck, "slides", css_rel="tokens.css")
+        self.assertTrue(r["ok"], r)
+        page = (deck / "out" / "index.html").read_text()
+        self.assertIn("--hs-fg:#1f2430", page)  # the default theme is there
+        self.assertIn('<link rel="stylesheet" href="tokens.css">', page)
+        self.assertLess(page.index("--hs-fg:#1f2430"), page.index('href="tokens.css"'))
+        self.assertEqual(page.count('href="tokens.css"'), 1)
+
+    def test_builtin_layers_tokens_under_deck_stylesheet(self) -> None:
+        deck = make_deck(self.root / "d", ["<section class='slide'><h1>A</h1></section>"])
+        (deck / "assets").mkdir()
+        (deck / "assets" / "deck.css").write_text(".slide{color:var(--color-ink)}")
+        (deck / "tokens.css").write_text(":root{--color-ink:#0a0}")
+        r = build.build(self.data, deck, "slides", css_rel="assets/deck.css")
+        self.assertTrue(r["ok"], r)
+        page = (deck / "out" / "index.html").read_text()
+        self.assertLess(page.index('href="tokens.css"'), page.index('href="assets/deck.css"'))
+        self.assertNotIn("--hs-accent", page)
+
     def test_builtin_reports_validation_issue(self) -> None:
         deck = make_deck(self.root / "d", ["<section class='slide'>a</section><section>b</section>"])
         r = build.build(self.data, deck, "slides")

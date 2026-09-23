@@ -233,20 +233,29 @@ def run_builtin(deck: Path, slides_dir: str, output: str, css_rel: str | None = 
     target = deck / output
     depth = len(Path(output).parent.parts)
     base_href = "../" * depth if depth else "./"
+    # Stylesheets, in the same order the preview uses (preview.wrap_slide):
+    # - deck stylesheet: tokens.css (if any) first so the deck css can read its
+    #   variables, then the deck css; no default theme.
+    # - tokens.css only: the default theme first, then tokens.css so its --hs-*
+    #   hooks override the theme's defaults.
+    # - nothing: the default theme.
+    theme = ""
     if css_rel and (deck / css_rel).is_file():
-        theme = f'<link rel="stylesheet" href="{html.escape(css_rel, quote=True)}">'
-        if css_rel != "tokens.css" and (deck / "tokens.css").is_file():
-            theme = '<link rel="stylesheet" href="tokens.css">' + theme  # variables layer under the deck css
-        css = ""
+        link = f'<link rel="stylesheet" href="{html.escape(css_rel, quote=True)}">'
+        if preview_lib.is_tokens_css(css_rel):
+            theme = f"<style>{preview_lib.default_theme_css()}</style>" + link
+        elif (deck / "tokens.css").is_file():
+            theme = '<link rel="stylesheet" href="tokens.css">' + link
+        else:
+            theme = link
     else:
-        theme = ""
-        css = preview_lib.default_theme_css()
+        theme = f"<style>{preview_lib.default_theme_css()}</style>"
     body = "\n".join(parts)
     page = (
         '<!doctype html><html><head><meta charset="utf-8">'
         f'<base href="{base_href}">'
         f"<title>{html.escape(deck.name)}</title>{theme}"
-        f"<style>{css}\nhtml,body{{height:100%;background:#111;overflow:hidden}}"
+        "<style>html,body{height:100%;background:#111;overflow:hidden}"
         ".hs-stage{position:absolute;left:50%;top:50%;width:1280px;height:720px;margin:-360px 0 0 -640px;transform-origin:center center;background:#fff}"
         ".hs-stage>.slide{display:none;position:absolute;inset:0}.hs-stage>.slide.active{display:flex;animation:none}"
         "#hs-counter{position:fixed;right:12px;bottom:8px;color:#888;font:12px monospace}"

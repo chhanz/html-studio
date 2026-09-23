@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Client, DesignInfo, TweakInfo, TweakItem } from '../api'
+import type { Rebuild, Client, DesignInfo, TweakInfo, TweakItem } from '../api'
 import { ApiError } from '../api'
 import { SmallBtn } from './SmallBtn'
 import { Spinner } from './Spinner'
@@ -18,7 +18,8 @@ type Props = {
   /** Called after the preview server accepted new overrides (bump reloadKey). */
   onPreview: () => void
   /** Called after Apply wrote tokens.css (refresh design info, preview). */
-  onApplied: () => void
+  /** Changes were written; ``rebuild`` is what the backend did about the built output. */
+  onApplied: (rebuild?: Rebuild) => void
   onClose: () => void
 }
 
@@ -90,10 +91,10 @@ export function TweakPanel({ t, client, deckPath, design, onWriteTokens, tokensB
     setApplying(true)
     setError(null)
     try {
-      await client.tweakApply(deckPath, changes)
+      const res = await client.tweakApply(deckPath, changes)
       setChanges({})
       setApplied(true)
-      onApplied()
+      onApplied(res.rebuild)
       await load()
     } catch (e) {
       setError(e instanceof ApiError ? e.code : 'request_failed')
