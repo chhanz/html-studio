@@ -116,7 +116,8 @@ class ServerTest(unittest.TestCase):
         code, data = self.request("GET", "/api/status", signed=True)
         self.assertEqual(code, 200)
         self.assertEqual(data["app"], "html-studio")
-        self.assertEqual(data["version"], "0.1.34")
+        # The manifest is the source of truth; verify.sh pins server.py to it.
+        self.assertEqual(data["version"], json.loads((REPO / "app.json").read_text(encoding="utf-8"))["version"])
         self.assertTrue(data["dataDir"].startswith(self.tmp.name))
 
     def test_signed_unknown_route_is_404(self) -> None:

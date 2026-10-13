@@ -1,6 +1,6 @@
 import { useAppApi } from '@kirocrew/app-sdk'
 import { Card, CardTitle, PageHeader } from '@kirocrew/app-sdk/ui'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { type Deck, type NewDeckRequest, makeClient } from './api'
 import { BuildPanel } from './components/BuildPanel'
 import { CheckPanel } from './components/CheckPanel'
@@ -10,6 +10,7 @@ import { CodeEditor } from './components/CodeEditor'
 import { DeckPanel } from './components/DeckPanel'
 import { PinsPanel } from './components/PinsPanel'
 import { Presenter } from './components/Presenter'
+import { ShowWindow, readShowParams, showWindowUrl } from './components/ShowWindow'
 import { QuickChips } from './components/QuickChips'
 import { Section, useCollapsed } from './components/Section'
 import { SlideStrip } from './components/SlideStrip'
@@ -39,12 +40,22 @@ import { LOCALES, type LocalePref, useI18n } from './i18n'
 // (--accent, --muted, --border, --ok, --warn, --danger, --text, --card, --bg).
 
 /**
+ * Entry. The dashboard mounts this once per page. A page opened by Present
+ * (same app URL plus the show parameters) renders only the show; every other
+ * page is the studio.
+ */
+export default function HtmlStudio() {
+  const show = readShowParams(location.search)
+  return show ? <ShowWindow params={show} /> : <Studio />
+}
+
+/**
  * The studio page. Each concern lives in a hook under ./hooks; this component
  * wires them together and lays out the panes. Read top to bottom: connection
  * and deck list, the preview of the selected deck, then everything that acts
  * on it (build, chat, pins, check, arrange, theme, pdf), then the layout.
  */
-export default function HtmlStudio() {
+function Studio() {
   const api = useAppApi()
   const client = useMemo(() => makeClient(api), [api])
   const { t, locale, pref, setPref } = useI18n()
@@ -83,11 +94,51 @@ export default function HtmlStudio() {
   const { ratio: codeRatio, boxRef: codeViewRef, onPointerDown: onCodeSplitterDown } = codeSplit
   const { headRef, headH } = useHeaderHeight()
 
-  const [presenting, setPresenting] = useState(false)
+  // Presenting. The show opens in its own window (this app's page with the show
+  // parameters): the dashboard stays usable and the window can be dragged to
+  // the projector. If the window cannot be opened (pop-ups blocked), the show
+  // runs as an in-app fullscreen overlay instead.
+  const [presenting, setPresenting] = useState(false) // the in-app overlay (fallback)
+  const [showWin, setShowWin] = useState<Window | null>(null)
   const present = useCallback(() => {
-    if (!selected || !showUrl) return
-    setPresenting(true)
-  }, [selected, showUrl])
+    if (!selected || !showUrl || !preview) return
+    if (showWin && !showWin.closed) {
+      showWin.focus()
+      return
+    }
+    const target = showWindowUrl({ deck: selected.path, url: showUrl, base: preview.baseUrl, slide: current + 1, count: preview.slides.length })
+    const w = Math.min(1280, Math.round((screen.availWidth || 1280) * 0.8))
+    const h = Math.round((w * 9) / 16) + 40
+    const win = window.open(target, 'hs-show', `popup=yes,width=${w},height=${h},resizable=yes`)
+    if (!win) {
+      setPresenting(true)
+      return
+    }
+    try {
+      win.focus()
+    } catch {
+      /* a vetoed focus is cosmetic */
+    }
+    setShowWin(win)
+  }, [selected, showUrl, preview, current, showWin])
+  // The show window closed: the show is over; pick up the slide it ended on.
+  useEffect(() => {
+    if (!showWin || !preview) return
+    const base = preview.baseUrl
+    const id = setInterval(() => {
+      if (!showWin.closed) return
+      clearInterval(id)
+      setShowWin(null)
+      fetch(`${base}/present/state`)
+        .then((r) => r.json())
+        .then((st: { index?: number }) => {
+          if (typeof st.index === 'number') setCurrent(st.index)
+        })
+        .catch(() => undefined)
+    }, 1000)
+    return () => clearInterval(id)
+  }, [showWin, preview, setCurrent])
+  const showOpen = !!showWin && !showWin.closed
 
   // New deck wizard. After creation the deck is selected; optionally the deck
   // chat opens with the wizard's answers and asks for an outline.
@@ -362,8 +413,8 @@ export default function HtmlStudio() {
                 {pdf?.state === 'running' && <Spinner />}
                 {t('toolbar.pdf')}
               </SmallBtn>
-              <SmallBtn active onClick={present} disabled={!showUrl} title={showUrl ? t('present.hint') : t('present.need_output')}>
-                {t('toolbar.present')}
+              <SmallBtn active onClick={present} disabled={!showUrl} title={showOpen ? t('present.open_hint') : showUrl ? t('present.hint') : t('present.need_output')} aria-pressed={showOpen}>
+                {showOpen ? t('toolbar.presenting') : t('toolbar.present')}
               </SmallBtn>
               </div>
             </div>

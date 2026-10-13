@@ -34,7 +34,7 @@ HTML decks are easy for an agent to write and hard for a person to steer: you en
 
 **Check and present**
 - **Check**: renders every slide headless and reports overflow, clipped or overlapping content, broken images, low contrast, forbidden punctuation, external resources, inline font sizes and a missing cover. Each issue can become a pin.
-- **Present**: a fullscreen show inside the app plus a presenter window in your browser (current and next slide, speaker notes, timer, pen that draws on the show, blackout). The two stay in sync through the local preview server. The show is assembled live from the slide files, so it always matches what you see in the viewer and needs no build.
+- **Present**: the show opens in its own window, so you can drag it to the projector and take it fullscreen while the studio stays on your screen, plus a presenter window in your browser (current and next slide, speaker notes, timer, pen that draws on the show, blackout). The windows stay in sync through the local preview server. The show is assembled live from the slide files, so it always matches what you see in the viewer and needs no build.
 - **Build**: assembles the slides into one `out/index.html` for sharing, or runs the deck's own build command after you approve it once (a `build.sh` or `rebuild.sh` found in the deck is offered). A deck built by its own command presents that output, and the studio says when the output is older than the slides.
 - **PDF**: every slide as a page, using the deck's own print styles.
 

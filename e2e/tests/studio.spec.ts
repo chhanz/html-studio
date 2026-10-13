@@ -278,7 +278,7 @@ test('single-file deck: previews sections, build is disabled with a hint', async
   await expect(page.getByRole('group', { name: /^View$/ })).toBeVisible()
 })
 
-test('present opens an in-app presenter at the current slide, live from the slide files (no build)', async ({ page }) => {
+test('present opens the show in its own window at the current slide, live from the slide files (no build)', async ({ page }) => {
   await openApp(page)
   await addFixtureRoot(page)
   await selectDeck(page, 'acme-quarterly')
@@ -289,56 +289,77 @@ test('present opens an in-app presenter at the current slide, live from the slid
   await page.keyboard.press('ArrowRight')
   await expect(page.getByText('3 / 4')).toBeVisible()
 
+  // The show is this same app page opened again with the show parameters, in
+  // its own window (the dashboard stays usable; the window goes to the projector).
+  const popupPromise = page.waitForEvent('popup')
   await page.getByRole('button', { name: /^Present$/ }).click()
-  const dialog = page.getByRole('dialog', { name: /Presentation/ })
+  const show = await popupPromise
+  expect(show.url()).toMatch(/[?&]hsShow=1/)
+  await expect(page.getByRole('button', { name: /^Presenting$/ })).toBeVisible()
+  const dialog = show.getByRole('dialog', { name: /Presentation/ })
   await expect(dialog).toBeVisible()
-  const frame = page.frameLocator('iframe[title="Presentation"]')
+  await expect(show.getByTestId('present-window-hint')).toBeVisible() // not fullscreen yet: how to get there
+  const frame = show.frameLocator('iframe[title="Presentation"]')
   await expect(frame.locator('.slide.active')).toContainText('Uptime')
   await expect(frame.locator('#hs-counter')).toHaveText('3 / 4')
 
-  await page.keyboard.press('ArrowRight')
+  await show.keyboard.press('ArrowRight')
   await expect(frame.locator('#hs-counter')).toHaveText('4 / 4')
-  await page.mouse.move(400, 300) // control bar auto-hides; a pointer move reveals it
+  await show.mouse.move(400, 300) // control bar auto-hides; a pointer move reveals it
   await expect(dialog.getByText('4 / 4')).toBeVisible()
-  await page.keyboard.press('ArrowLeft')
+  await show.keyboard.press('ArrowLeft')
   await expect(frame.locator('#hs-counter')).toHaveText('3 / 4')
 
   // Image under the pointer → lightbox (hit-tested inside the deck frame).
   const img = frame.locator('.slide.active img')
   const box = await img.boundingBox()
   if (!box) throw new Error('fixture image not laid out')
-  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
-  const zoom = page.getByTestId('present-zoom')
+  await show.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+  const zoom = show.getByTestId('present-zoom')
   await expect(zoom).toBeVisible()
   // Handed over as a data URL: the dashboard CSP forbids http: image sources.
   await expect(zoom.locator('img')).toHaveAttribute('src', /^data:image\/png;base64,/)
   await expect.poll(() => zoom.locator('img').evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0)).toBe(true)
   await expect(zoom).toHaveAccessibleName('Uptime chart')
-  await page.keyboard.press('Escape') // closes the lightbox only
+  await show.keyboard.press('Escape') // closes the lightbox only
   await expect(zoom).toHaveCount(0)
   await expect(dialog).toBeVisible()
   await expect(frame.locator('#hs-counter')).toHaveText('3 / 4')
 
-  await page.getByTestId('present-shield').click({ position: { x: 5, y: 5 } }) // miss: clicks never navigate
-  await page.waitForTimeout(200)
+  await show.getByTestId('present-shield').click({ position: { x: 5, y: 5 } }) // miss: clicks never navigate
+  await show.waitForTimeout(200)
   await expect(frame.locator('#hs-counter')).toHaveText('3 / 4')
-  await page.keyboard.press('ArrowRight')
+  await show.keyboard.press('ArrowRight')
   await expect(frame.locator('#hs-counter')).toHaveText('4 / 4')
-  await page.keyboard.press('Escape')
-  await expect(dialog).toHaveCount(0)
+  // Esc only leaves fullscreen in the show window; the show stays until the window closes.
+  await show.keyboard.press('Escape')
+  await expect(dialog).toBeVisible()
+  await show.close()
+  // The dashboard notices and picks up the slide the show ended on.
+  await expect(page.getByRole('button', { name: /^Present$/ })).toBeVisible()
+  await expect(page.getByText('4 / 4')).toBeVisible()
 
   // Presenting again works after a close, and an edit made outside the studio
   // is in the show at once: the show, the presenter and the viewer share one source.
   const uptime = `${home}/decks/acme-quarterly/slides/030_uptime.html`
   const src = await (await page.request.get(`/__ctl/read?path=${encodeURIComponent(uptime)}`)).text()
   await page.request.post('/__ctl/write', { data: { path: uptime, text: src.replace('<h2>Uptime</h2>', '<h2>Uptime, live</h2>') } })
+  const popup2 = page.waitForEvent('popup')
   await page.getByRole('button', { name: /^Present$/ }).click()
-  await expect(dialog).toBeVisible()
-  await expect(frame.locator('#hs-counter')).toHaveText('4 / 4')
-  await page.keyboard.press('ArrowLeft')
-  await expect(frame.locator('.slide.active h2')).toHaveText('Uptime, live')
-  await page.keyboard.press('Escape')
-  await expect(dialog).toHaveCount(0)
+  const show2 = await popup2
+  const dialog2 = show2.getByRole('dialog', { name: /Presentation/ })
+  await expect(dialog2).toBeVisible()
+  const frame2 = show2.frameLocator('iframe[title="Presentation"]')
+  await expect(frame2.locator('#hs-counter')).toHaveText('4 / 4')
+  await show2.keyboard.press('ArrowLeft')
+  await expect(frame2.locator('.slide.active h2')).toHaveText('Uptime, live')
+  // Present again while the window is open: it is focused, not opened twice.
+  await page.getByRole('button', { name: /^Presenting$/ }).click()
+  await page.waitForTimeout(300)
+  expect(page.context().pages().filter((p) => /hsShow=1/.test(p.url()))).toHaveLength(1)
+  await show2.getByRole('button', { name: /^Exit$/ }).click() // Exit closes the window
+  await expect.poll(() => show2.isClosed()).toBe(true)
+  await expect(page.getByRole('button', { name: /^Present$/ })).toBeVisible()
 })
 
 test('exports the built deck to PDF', async ({ page }) => {
@@ -790,12 +811,14 @@ test('present opens the presenter window in ANOTHER browser and stays in sync: s
 
   // Present: the show opens here; the presenter window is requested from the backend
   // (no browser launch in tests, so we open its URL ourselves in a separate browser context).
+  const popupPromise = page.waitForEvent('popup')
   await page.getByRole('button', { name: /^Present$/ }).click()
-  const dialog = page.getByRole('dialog', { name: /Presentation/ })
+  const show = await popupPromise
+  const dialog = show.getByRole('dialog', { name: /Presentation/ })
   await expect(dialog).toBeVisible()
-  const frame = page.frameLocator('iframe[title="Presentation"]')
+  const frame = show.frameLocator('iframe[title="Presentation"]')
   await expect(frame.locator('#hs-counter')).toHaveText('1 / 4')
-  await expect(page.getByTestId('present-presenter')).toHaveAttribute('data-on', 'false')
+  await expect(show.getByTestId('present-presenter')).toHaveAttribute('data-on', 'false')
   const presenterUrl = (await (await page.request.post('/apps/html-studio/api/present', { data: { path: deckPath, slide: 1, mode: 'presenter', language: 'en' } })).json()).url as string
   expect(presenterUrl).toMatch(/\/presenter\?lang=en#1$/)
   const other = await browser.newContext()
@@ -803,7 +826,7 @@ test('present opens the presenter window in ANOTHER browser and stays in sync: s
   await presenter.goto(presenterUrl)
   await expect(presenter.locator('#cur-label')).toHaveText('Slide 1 of 4')
   await expect(presenter.locator('#notes')).toHaveText('No notes for this slide.')
-  await expect(page.getByTestId('present-presenter')).toHaveAttribute('data-on', 'true')
+  await expect(show.getByTestId('present-presenter')).toHaveAttribute('data-on', 'true')
 
   // Presenter navigates: the show follows; notes and next slide update in the presenter.
   await presenter.keyboard.press('ArrowRight')
@@ -813,7 +836,7 @@ test('present opens the presenter window in ANOTHER browser and stays in sync: s
   await expect(frame.locator('#hs-counter')).toHaveText('2 / 4')
 
   // The show navigates (clicker on the presenting machine): the presenter follows.
-  await page.keyboard.press('ArrowRight')
+  await show.keyboard.press('ArrowRight')
   await expect(frame.locator('#hs-counter')).toHaveText('3 / 4')
   await expect(presenter.locator('#cur-label')).toHaveText('Slide 3 of 4')
 
@@ -826,7 +849,7 @@ test('present opens the presenter window in ANOTHER browser and stays in sync: s
   await presenter.mouse.down()
   await presenter.mouse.move(box.x + box.width * 0.6, box.y + box.height * 0.6, { steps: 12 })
   await presenter.mouse.up()
-  const ink = page.getByTestId('present-ink')
+  const ink = show.getByTestId('present-ink')
   await expect(ink).toHaveAttribute('data-strokes', '1')
   await expect.poll(async () => (await strokesOf(2))[0]?.pts.length ?? 0).toBeGreaterThan(5)
   const pts = (await strokesOf(2))[0].pts
@@ -858,16 +881,16 @@ test('present opens the presenter window in ANOTHER browser and stays in sync: s
 
   // Black both ways.
   await presenter.locator('#black').click()
-  await expect(page.getByTestId('present-black')).toBeVisible()
-  await page.mouse.move(400, 300) // the control bar auto-hides; a pointer move brings it back
-  await page.getByRole('button', { name: /^Black$/ }).click({ force: true })
-  await expect(page.getByTestId('present-black')).toHaveCount(0)
+  await expect(show.getByTestId('present-black')).toBeVisible()
+  await show.mouse.move(400, 300) // the control bar auto-hides; a pointer move brings it back
+  await show.getByRole('button', { name: /^Black$/ }).click({ force: true })
+  await expect(show.getByTestId('present-black')).toHaveCount(0)
   await expect(presenter.locator('#black')).toHaveAttribute('aria-pressed', 'false')
 
-  // Esc ends the show; the studio lands on the slide we ended on, and the pen is gone
-  // (server state reset, presenter canvas cleared).
-  await page.keyboard.press('Escape')
-  await expect(dialog).toHaveCount(0)
+  // Closing the show window ends the show; the studio lands on the slide we ended
+  // on, and the pen is gone (server state reset, presenter canvas cleared).
+  await show.close()
+  await expect(page.getByRole('button', { name: /^Present$/ })).toBeVisible()
   await expect(page.getByText('3 / 4')).toBeVisible()
   await expect.poll(async () => JSON.stringify((await (await page.request.get(stateUrl)).json()).ink)).toBe('{}')
   await expect.poll(() => presenter.evaluate(() => {

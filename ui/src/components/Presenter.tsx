@@ -17,6 +17,14 @@ type Props = {
   openPresenter?: (slide: number) => Promise<void>
   /** Called when the show ends with the slide it ended on (1-based). */
   onPosition?: (slide: number) => void
+  /**
+   * `overlay` (default): inside the dashboard window, where presenting IS
+   * fullscreen and leaving fullscreen ends the show.
+   * `window`: the component IS the page of its own pop-out window. Fullscreen is
+   * a button (a fresh window has no user activation to request it on load),
+   * Esc only leaves fullscreen, and closing the window ends the show.
+   */
+  mode?: 'overlay' | 'window'
 }
 
 type Stroke = { id: string; pts: [number, number][] }
@@ -51,8 +59,13 @@ type Zoom = { kind: 'img'; src: string; alt: string } | { kind: 'svg'; svg: stri
  *  - Closing never waits on the Fullscreen API: unmount first, then exit
  *    fullscreen best-effort. The shell can lower the window without firing
  *    fullscreenchange, so a watchdog compares the viewport with the screen.
+ *  - In `window` mode (the show in its own pop-out window) none of the
+ *    fullscreen coupling applies: that window is a plain BrowserWindow where
+ *    the Fullscreen API behaves normally, so fullscreen is just a button, Esc
+ *    leaves it, and the window's own close ends the show.
  */
-export function Presenter({ t, url, baseUrl, startSlide, slideCount, onClose, openPresenter, onPosition }: Props) {
+export function Presenter({ t, url, baseUrl, startSlide, slideCount, onClose, openPresenter, onPosition, mode = 'overlay' }: Props) {
+  const inWindow = mode === 'window'
   const rootRef = useRef<HTMLDivElement>(null)
   const frameRef = useRef<HTMLIFrameElement>(null)
   const [current, setCurrent] = useState(startSlide)
@@ -273,13 +286,22 @@ export function Presenter({ t, url, baseUrl, startSlide, slideCount, onClose, op
     void tick()
     const id = setInterval(tick, es ? 1000 : 100)
     window.addEventListener('resize', redrawInk)
+    // The show is over: the pen goes with it (the presenter window clears too).
+    // In its own window the close never unmounts React, so pagehide carries it.
+    let ended = false
+    const endShow = () => {
+      if (ended) return
+      ended = true
+      void fetch(stateUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: 'audience', ink: { op: 'reset' } }), keepalive: true }).catch(() => undefined)
+    }
+    if (inWindow) window.addEventListener('pagehide', endShow)
     return () => {
       alive = false
       clearInterval(id)
       es?.close()
       window.removeEventListener('resize', redrawInk)
-      // The show is over: the pen goes with it (the presenter window clears too).
-      void fetch(stateUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: 'audience', ink: { op: 'reset' } }), keepalive: true }).catch(() => undefined)
+      window.removeEventListener('pagehide', endShow)
+      endShow()
       onPosition?.(currentRef.current)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -287,6 +309,12 @@ export function Presenter({ t, url, baseUrl, startSlide, slideCount, onClose, op
 
   useEffect(() => {
     rootRef.current?.focus()
+    if (inWindow) {
+      // Own window: fullscreen is the user's call (button); its exit means nothing.
+      const onChange = () => setFullscreen(!!document.fullscreenElement)
+      document.addEventListener('fullscreenchange', onChange)
+      return () => document.removeEventListener('fullscreenchange', onChange)
+    }
     enterFullscreen()
     const onChange = () => {
       const fs = !!document.fullscreenElement
@@ -334,7 +362,11 @@ export function Presenter({ t, url, baseUrl, startSlide, slideCount, onClose, op
       if (e.metaKey || e.ctrlKey || e.altKey) return
       if (e.key === 'Escape') {
         if (zoomRef.current) setZoom(null)
-        else close()
+        else if (inWindow) {
+          // Esc leaves fullscreen only; the window stays until it is closed.
+          if (document.fullscreenElement) document.exitFullscreen().catch(() => undefined)
+          return
+        } else close()
       } else if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ' || e.key === 'Enter') {
         setZoom(null)
         go(current + 1)
@@ -349,7 +381,7 @@ export function Presenter({ t, url, baseUrl, startSlide, slideCount, onClose, op
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [current, go, close, slideCount])
+  }, [current, go, close, slideCount, inWindow])
 
   // Auto-hide the control bar while the pointer is still.
   const poke = () => {
@@ -408,14 +440,23 @@ export function Presenter({ t, url, baseUrl, startSlide, slideCount, onClose, op
           )}
         </div>
       )}
+      {inWindow && !fullscreen && (
+        <div
+          data-testid="present-window-hint"
+          className="absolute left-0 right-0 top-0 px-3 py-2 text-[12px] text-center"
+          style={{ background: 'rgba(0,0,0,.6)', color: '#ddd', zIndex: 10, pointerEvents: 'none' }}
+        >
+          {t('present.window_hint')}
+        </div>
+      )}
       <div
         className="absolute left-0 right-0 bottom-0 flex items-center gap-2 px-3 py-2 text-[12px] transition-opacity"
-        style={{ background: 'rgba(0,0,0,.6)', color: '#ddd', opacity: chrome ? 1 : 0, zIndex: 10 }}
+        style={{ background: 'rgba(0,0,0,.6)', color: '#ddd', opacity: chrome || (inWindow && !fullscreen) ? 1 : 0, zIndex: 10 }}
       >
         <SmallBtn onClick={() => go(current - 1)} disabled={current <= 1} aria-label={t('viewer.prev')} style={btn}>◂</SmallBtn>
         <span className="tabular-nums">{current} / {slideCount}</span>
         <SmallBtn onClick={() => go(current + 1)} disabled={current >= slideCount} aria-label={t('viewer.next')} style={btn}>▸</SmallBtn>
-        <span className="ml-3 text-[11px]" style={{ color: '#999' }}>{t('present.keys')}</span>
+        <span className="ml-3 text-[11px]" style={{ color: '#999' }}>{inWindow ? t('present.keys_window') : t('present.keys')}</span>
         <span className="ml-3 inline-flex items-center gap-1 text-[11px]" data-testid="present-presenter" data-on={presenterOn ? 'true' : 'false'} style={{ color: presenterOn ? '#4ade80' : '#999' }}>
           <span aria-hidden className="inline-block rounded-full" style={{ width: 7, height: 7, background: presenterOn ? '#22c55e' : '#666' }} />
           {presenterOn ? t('present.presenter_on') : t('present.presenter_off')}
