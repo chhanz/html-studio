@@ -45,7 +45,7 @@ cd .. && ./verify.sh
 
 ## Releases
 
-`main` holds sources only; `ui/dist` is ignored there. The Kiro Crew app catalog installs by plain git clone with no build step, so it points at the `release` branch, which is `main` plus the built UI. To cut one, bump `version` in `app.json` and `APP_VERSION` in `backend/server.py` together (`verify.sh` checks they match), then run `tools/release.sh` from a clean `main`: it builds the UI, merges `main` into `release`, commits `ui/dist` there and tags `v<version>`. Push `main`, `release` and the tag.
+`main` holds sources only; `ui/dist` is ignored there. The Kiro Crew app catalog installs by plain git clone with no build step, so it points at a release branch commit, which is `main` plus the built UI. Each version gets its own branch, `release-v<version>` (for example `release-v0.1.35`), and a tag `v<version>` on the same commit. To cut one, bump `version` in `app.json` and `APP_VERSION` in `backend/server.py` together (`verify.sh` checks they match), then run `tools/release.sh` from a clean `main`: it builds the UI, creates `release-v<version>` from `main`, commits `ui/dist` there and tags it. Push `main`, the release branch and the tag. The older `release` branch holds v0.1.34 and is kept only because the first catalog entry pins its commit.
 
 ## Commits and pull requests
 

@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
-# Cut a release: the `release` branch is `main` plus the built UI (ui/dist),
-# which the source branch ignores. The app catalog installs by plain git clone
-# with no build step, so its entry points at `release`; every other checkout
-# builds from source.
+# Cut a release: a `release-v<version>` branch that is `main` plus the built UI
+# (ui/dist), which the source branch ignores. The app catalog installs by plain
+# git clone with no build step, so its entry points at a release branch commit;
+# every other checkout builds from source.
 #
-#   tools/release.sh            # release the current main HEAD
+#   tools/release.sh                          # release the current main HEAD
+#   RELEASE_BRANCH=release tools/release.sh   # use another branch name
 #
-# Steps: verify main is clean and pushed-ready, build the UI, switch to
-# `release` (created from main on first use), merge main, force-add ui/dist,
+# Steps: verify main is clean, build the UI, create `release-v<version>` from
+# main (or merge main into it when it already exists), force-add ui/dist,
 # commit, tag v<version> from app.json, switch back to main. Nothing is pushed;
-# push `release` and the tag yourself:
+# push the branch and the tag yourself:
 #
-#   git push origin release --tags
+#   git push origin main release-v<version> --tags
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -24,6 +25,7 @@ py_version=$(sed -nE 's/^APP_VERSION = "([^"]+)"/\1/p' backend/server.py)
 if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
   echo "tag v$version exists: bump the version first"; exit 1
 fi
+branch="${RELEASE_BRANCH:-release-v$version}"
 
 echo "== build ui"
 (cd ui && npm run build --silent)
@@ -31,20 +33,20 @@ for f in ui/dist/index.mjs ui/dist/icons/nav.svg ui/dist/icons/nav-inactive.svg;
   [ -f "$f" ] || { echo "missing $f"; exit 1; }
 done
 
-echo "== release branch"
+echo "== release branch $branch"
 main_sha=$(git rev-parse --short HEAD)
-if git rev-parse -q --verify release >/dev/null; then
-  git switch -q release
+if git rev-parse -q --verify "refs/heads/$branch" >/dev/null; then
+  git switch -q "$branch"
   git merge -q --no-edit -X theirs main
 else
-  git switch -q -c release
+  git switch -q -c "$branch"
 fi
-# The built files are ignored on main; on release they are the point.
+# The built files are ignored on main; on the release branch they are the point.
 git add -f ui/dist
 git commit -q -m "Release v$version" -m "main $main_sha plus the built UI (ui/dist) for catalog installs." || echo "(dist unchanged)"
 git tag -a "v$version" -m "HTML Studio v$version"
 rel_sha=$(git rev-parse --short HEAD)
 git switch -q main
 
-echo "released v$version: release@$rel_sha (main@$main_sha)"
-echo "next: git push origin main release --tags"
+echo "released v$version: $branch@$rel_sha (main@$main_sha)"
+echo "next: git push origin main $branch --tags"
