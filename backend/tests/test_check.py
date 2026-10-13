@@ -49,35 +49,68 @@ class StaticTests(unittest.TestCase):
         self.assertEqual(r["disabled"], ["contrast"])
 
     def test_check_error_is_reported_as_a_warning(self) -> None:
-        r = check.finish([{"rule": "check-error", "slideIndex": 1, "detail": "slide did not settle within 20s"}], ["a.html", "b.html"], set())
+        r = check.finish([{"rule": "check-error", "slideIndex": 1, "detail": "slide did not settle within 20s"}], ["a.html", "b.html"], set(), [1])
         self.assertEqual([(i["rule"], i["severity"], i["slideFile"]) for i in r["issues"]], [("check-error", "warning", "b.html")])
+        self.assertEqual(r["unmeasured"], [1])
+        self.assertEqual(check.finish([], ["a.html"], set())["unmeasured"], [])
 
-    def test_run_rendered_retries_once_and_hides_display_noise(self) -> None:
-        calls: list[int] = []
-        noise = "[1013/143034.689762:ERROR:ui/display/mac/cv_display_link_mac.mm:195] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\nreal problem here\n"
+    def test_run_timeout_grows_with_the_deck(self) -> None:
+        self.assertEqual(check.run_timeout(1), check.CHECK_TIMEOUT_SEC)
+        self.assertGreater(check.run_timeout(120), check.run_timeout(41))
+        self.assertGreaterEqual(check.run_timeout(41), 30 + 7 * 25)
 
-        def fake_run(browser: str, url: str, timeout: int) -> tuple[list[str], str]:
-            calls.append(1)
-            if len(calls) == 1:
-                return [], noise
-            return ['{"count": 1, "issues": []}'], ""
+    def test_sink_records_slides_and_done(self) -> None:
+        sink = preview.CheckSink()
+        self.assertFalse(sink.post({"run": "nope", "slide": 0, "issues": []}))
+        sink.begin("r1", 3)
+        self.assertTrue(sink.post({"run": "r1", "slide": 1, "issues": [{"rule": "overflow"}, "junk"]}))
+        self.assertTrue(sink.post({"run": "r1", "slide": 7, "issues": []}))  # out of range: ignored, run still known
+        self.assertFalse(sink.wait("r1", timeout=0.05))
+        snap = sink.snapshot("r1")
+        assert snap is not None
+        self.assertEqual(snap["slides"], {1: [{"rule": "overflow"}]})
+        self.assertTrue(sink.post({"run": "r1", "done": True}))
+        self.assertTrue(sink.wait("r1", timeout=0.05))
+        sink.end("r1")
+        self.assertIsNone(sink.snapshot("r1"))
+        self.assertTrue(sink.wait("r1", timeout=0.05))  # unknown run: nothing to wait for
 
-        orig = check._run_once
-        check._run_once = fake_run  # type: ignore[assignment]
-        try:
-            self.assertEqual(check.run_rendered("chrome", "http://x/check")["count"], 1)
-            self.assertEqual(len(calls), 2)
-            calls.clear()
-            check._run_once = lambda b, u, t: ([], noise)  # type: ignore[assignment]
-            with self.assertRaises(RuntimeError) as cm:
-                check.run_rendered("chrome", "http://x/check")
-            self.assertEqual(str(cm.exception), "check did not finish inside the browser: real problem here")
-            check._run_once = lambda b, u, t: ([], noise.splitlines()[0] + "\n")  # type: ignore[assignment]
-            with self.assertRaises(RuntimeError) as cm:
-                check.run_rendered("chrome", "http://x/check")
-            self.assertEqual(str(cm.exception), "check did not finish inside the browser")
-        finally:
-            check._run_once = orig  # type: ignore[assignment]
+    def test_browser_that_exits_early_yields_a_partial_result(self) -> None:
+        # A "browser" that posts slide 0 and quits: slides 1 and 2 come back as
+        # check-error issues instead of the whole run failing.
+        with tempfile.TemporaryDirectory() as tmp:
+            fake = Path(tmp) / "browser.py"
+            fake.write_text(
+                "import json, sys, urllib.request\n"
+                "url = sys.argv[-1]\n"
+                "base, q = url.split('?', 1)\n"
+                "run = dict(p.split('=') for p in q.split('&'))['run']\n"
+                "sys.stderr.write('[1013/1.0:ERROR:ui/display/mac/cv_display_link_mac.mm:195] CVDisplayLinkCreateWithCGDisplay failed.\\nsomething real\\n')\n"
+                "body = json.dumps({'run': run, 'slide': 0, 'issues': [{'rule': 'punctuation', 'slideIndex': 0}]}).encode()\n"
+                "urllib.request.urlopen(urllib.request.Request(base.rsplit('/', 1)[0] + '/check/result', data=body, headers={'Content-Type': 'application/json'}))\n",
+                encoding="utf-8",
+            )
+            launcher = Path(tmp) / "browser"
+            launcher.write_text(f"#!/bin/sh\nexec '{sys.executable}' '{fake}' \"$@\"\n", encoding="utf-8")
+            launcher.chmod(0o755)
+            deck = Path(tmp) / "deck"
+            (deck / "slides").mkdir(parents=True)
+            for n in ("010", "020", "030"):
+                (deck / "slides" / f"{n}.html").write_text(SLIDE_B, encoding="utf-8")
+            p = preview.DeckPreview(deck, "slides", None)
+            port = p.start()
+            try:
+                r = check.run_rendered(str(launcher), f"http://127.0.0.1:{port}/check", p.checks, 3, timeout=30)
+            finally:
+                p.stop()
+        self.assertEqual(r["count"], 3)
+        self.assertEqual(r["unmeasured"], [1, 2])
+        self.assertEqual([i["rule"] for i in r["issues"]], ["punctuation", "check-error", "check-error"])
+        detail = r["issues"][1]["detail"]
+        self.assertIn("browser exited", detail)
+        self.assertIn("something real", detail)
+        self.assertNotIn("CVDisplayLink", detail)
+        self.assertEqual(p.checks._runs, {})  # run cleaned up
 
 
 @unittest.skipIf(BROWSER is None, "no headless Chromium available")
@@ -91,10 +124,11 @@ class RenderedTests(unittest.TestCase):
             p = preview.DeckPreview(deck, "slides", None)
             port = p.start()
             try:
-                r = check.run_rendered(BROWSER, f"http://127.0.0.1:{port}/check", timeout=90)
+                r = check.run_rendered(BROWSER, f"http://127.0.0.1:{port}/check", p.checks, 2, timeout=90)
             finally:
                 p.stop()
         self.assertEqual(r["count"], 2)
+        self.assertEqual(r["unmeasured"], [])
         by_rule: dict[str, list[dict]] = {}
         for i in r["issues"]:
             by_rule.setdefault(i["rule"], []).append(i)
@@ -148,7 +182,7 @@ class RenderedTests(unittest.TestCase):
                 p = preview.DeckPreview(deck, "slides", None)
                 port = p.start()
                 try:
-                    r = check.run_rendered(BROWSER, f"http://127.0.0.1:{port}/check", timeout=90, retries=0)
+                    r = check.run_rendered(BROWSER, f"http://127.0.0.1:{port}/check", p.checks, 2, timeout=60, slide_timeout_ms=3000)
                 finally:
                     p.stop()
         finally:
@@ -157,9 +191,10 @@ class RenderedTests(unittest.TestCase):
                 c.close()
             sink.close()
         self.assertEqual(r["count"], 2)
+        self.assertEqual(r["unmeasured"], [])  # the watchdog reported it; the run itself finished
         errs = [i for i in r["issues"] if i["rule"] == "check-error"]
         self.assertEqual([i["slideIndex"] for i in errs], [0])
-        self.assertIn("did not settle", errs[0]["detail"])
+        self.assertIn("did not settle within 3s", errs[0]["detail"])
 
 
 if __name__ == "__main__":

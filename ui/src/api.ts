@@ -211,7 +211,7 @@ export type CheckIssue = {
   src?: string | null
   otherSelector?: string
 }
-export type CheckResult = { issues: CheckIssue[]; counts: Record<string, number>; slides: number; rules: Record<string, CheckSeverity>; disabled: string[] }
+export type CheckResult = { issues: CheckIssue[]; counts: Record<string, number>; slides: number; rules: Record<string, CheckSeverity>; disabled: string[]; unmeasured?: number[] }
 export type CheckJob = { id: string; state: 'running' | 'done' | 'error'; result?: CheckResult; error?: string; detail?: string }
 
 export type NotesIndex = { withNotes: string[]; orphans: string[]; dir: string }

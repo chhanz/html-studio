@@ -146,6 +146,8 @@
   "check.fix_all_left": "{n} issues were not pinned: a batch holds {max} pins. Send these, then press Pin all again.",
   "check.close": "Close",
   "check.disabled": "Disabled in studio.json: {rules}",
+  "check.partial": "{n} of {total} slides could not be measured (the browser stalled); the others are reported below. Run the check again to cover them.",
+  "check.retry": "Check again",
   "check.failed": "Check failed",
   "check.rule.overflow": "Leaves the slide",
   "check.rule.clipped": "Content cut off",

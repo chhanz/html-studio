@@ -146,6 +146,8 @@
   "check.fix_all_left": "{n}개는 핀으로 만들지 않았습니다. 한 묶음은 {max}개까지입니다. 지금 핀을 보낸 뒤 [모두 핀으로]을 다시 누르세요.",
   "check.close": "닫기",
   "check.disabled": "studio.json에서 끔: {rules}",
+  "check.partial": "{total}장 중 {n}장을 측정하지 못했습니다(브라우저가 멈춤). 나머지 결과는 아래에 있습니다. 다시 점검하면 그 슬라이드도 점검합니다.",
+  "check.retry": "다시 점검",
   "check.failed": "점검 실패",
   "check.rule.overflow": "슬라이드 밖으로 나감",
   "check.rule.clipped": "내용 잘림",

@@ -2,9 +2,11 @@
 
 Rendered rules are measured by ``inject/check.js`` inside the preview server's
 ``/check`` document (every slide loaded in a same-origin iframe), run once per
-deck in headless Chromium with ``--dump-dom``; the script leaves its result in a
-``<script id="hs-check-output">`` element that this module reads back. The
-static rule (missing-cover) is evaluated here from the slide list.
+deck in headless Chromium. The script posts each slide's issues back to the
+preview server (``POST /check/result``) as the slide finishes; this module waits
+on that sink in wall-clock time and reports slides it never heard from as
+``check-error`` issues, so a stalled browser degrades the result instead of
+losing it. The static rule (missing-cover) is evaluated here from the slide list.
 
 Rules can be disabled per deck in ``studio.json``: ``{"check": {"disable": ["contrast"]}}``.
 """
@@ -40,9 +42,6 @@ RULES: dict[str, str] = {
     "check-error": "warning",
 }
 
-_RESULT_RE = re.compile(r'<script id="hs-check-output" type="application/json">(.*?)</script>', re.S)
-
-
 def disabled_rules(studio: dict[str, Any] | None) -> set[str]:
     check = (studio or {}).get("check") or {}
     dis = check.get("disable") if isinstance(check, dict) else None
@@ -65,53 +64,110 @@ def first_slide_classes(fragment: str) -> list[str]:
 
 # stderr lines Chromium prints on macOS that carry no information about the
 # check (the display link could not be created, e.g. while a display sleeps or
-# is being re-plugged). Dropped from the error shown to the user so the real
+# is being re-plugged). Dropped from the detail shown to the user so the real
 # cause, if any, is what they read.
 _NOISE_RE = re.compile(r"CVDisplayLink|cv_display_link_mac|ui/display/mac")
 
-
-def _run_once(browser: str, check_url: str, timeout: int) -> tuple[list[str], str]:
-    with tempfile.TemporaryDirectory(prefix="html-studio-check-") as profile:
-        cmd = [
-            browser, "--headless", "--disable-gpu", "--no-sandbox", "--hide-scrollbars",
-            f"--user-data-dir={profile}", "--use-mock-keychain", "--password-store=basic",
-            "--no-first-run", "--no-default-browser-check", "--disable-extensions",
-            # Best effort: do not drive frames from the macOS display link, which
-            # fails while a display is asleep or being re-plugged (unknown feature
-            # names are ignored by Chromium).
-            "--disable-features=CVDisplayLinkBeginFrameSource",
-            "--window-size=1400,900", "--run-all-compositor-stages-before-draw",
-            f"--virtual-time-budget={timeout * 1000}", "--dump-dom", check_url,
-        ]
-        env = {k: v for k, v in os.environ.items() if k in ("PATH", "HOME", "TMPDIR", "LANG", "LC_ALL")}
-        with open(Path(profile) / "stderr.log", "w+", encoding="utf-8") as errf:
-            proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=errf, timeout=timeout, env=env, check=False)
-            errf.seek(0)
-            stderr_text = errf.read()
-    dom = proc.stdout.decode("utf-8", errors="replace")
-    # The inlined check.js mentions the marker in a comment; the real one is last.
-    return _RESULT_RE.findall(dom), stderr_text
+# Per-slide settle budget inside check.js; the whole run gets this much per
+# batch of 6 plus a floor, in wall-clock time.
+SLIDE_TIMEOUT_MS = 20000
+_BATCH = 6
 
 
-def run_rendered(browser: str, check_url: str, *, timeout: int = CHECK_TIMEOUT_SEC, retries: int = 1) -> dict[str, Any]:
-    """Run the /check document in headless Chromium and return its JSON result.
+def run_timeout(count: int) -> int:
+    """Wall-clock budget for a deck of ``count`` slides: enough for every batch
+    to hit the per-slide watchdog and still finish, never below the floor."""
+    return max(CHECK_TIMEOUT_SEC, 30 + (count // _BATCH + 1) * (SLIDE_TIMEOUT_MS // 1000 + 5))
 
-    A run that ends without the result marker (the browser gave up on the page
-    before check.js finished) is retried once with a fresh profile: the cause is
-    usually transient (display change, a cold start) and a second run is cheap.
+
+def _unmeasured(idx: int, detail: str) -> dict[str, Any]:
+    return {"rule": "check-error", "slideIndex": idx, "selector": "", "tag": "", "classes": [], "text": "", "rect": None, "detail": detail}
+
+
+def run_rendered(
+    browser: str,
+    check_url: str,
+    sink: Any,
+    count: int,
+    *,
+    timeout: int | None = None,
+    slide_timeout_ms: int = SLIDE_TIMEOUT_MS,
+) -> dict[str, Any]:
+    """Run the /check document in headless Chromium; return ``{count, issues, unmeasured}``.
+
+    ``sink`` is the preview's ``CheckSink``: check.js posts each slide's issues
+    to it as the slide finishes, and this function waits (wall clock) until the
+    run reports done, the browser exits, or ``timeout`` passes. Slides never
+    heard from are reported as ``check-error`` issues rather than failing the
+    run, so the user always gets the slides that were measured.
     """
+    budget = timeout if timeout is not None else run_timeout(count)
+    run_id = uuid.uuid4().hex[:12]
+    url = f"{check_url}{'&' if '?' in check_url else '?'}run={run_id}&slideTimeout={int(slide_timeout_ms)}"
+    sink.begin(run_id, count)
     stderr_text = ""
-    for attempt in range(retries + 1):
-        matches, stderr_text = _run_once(browser, check_url, timeout)
-        if matches:
-            return json.loads(matches[-1])
+    exited_early = False
+    try:
+        with tempfile.TemporaryDirectory(prefix="html-studio-check-") as profile:
+            cmd = [
+                browser, "--headless", "--disable-gpu", "--no-sandbox", "--hide-scrollbars",
+                f"--user-data-dir={profile}", "--use-mock-keychain", "--password-store=basic",
+                "--no-first-run", "--no-default-browser-check", "--disable-extensions",
+                # Best effort: do not drive frames from the macOS display link, which
+                # fails while a display is asleep or being re-plugged (unknown feature
+                # names are ignored by Chromium).
+                "--disable-features=CVDisplayLinkBeginFrameSource",
+                "--window-size=1400,900", url,
+            ]
+            env = {k: v for k, v in os.environ.items() if k in ("PATH", "HOME", "TMPDIR", "LANG", "LC_ALL")}
+            with open(Path(profile) / "stderr.log", "w+", encoding="utf-8") as errf:
+                proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=errf, stdin=subprocess.DEVNULL, env=env)
+                try:
+                    deadline = time.monotonic() + budget
+                    while True:
+                        if sink.wait(run_id, timeout=min(1.0, max(0.0, deadline - time.monotonic()))):
+                            break
+                        if proc.poll() is not None:
+                            # The browser is gone (crash, display change): give late posts a moment.
+                            exited_early = True
+                            sink.wait(run_id, timeout=1.0)
+                            break
+                        if time.monotonic() >= deadline:
+                            break
+                finally:
+                    if proc.poll() is None:
+                        proc.terminate()
+                        try:
+                            proc.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            proc.kill()
+                            proc.wait(timeout=5)
+                errf.seek(0)
+                stderr_text = errf.read()
+        snap = sink.snapshot(run_id) or {"slides": {}, "done": False}
+    finally:
+        sink.end(run_id)
+    issues: list[dict[str, Any]] = []
+    unmeasured: list[int] = []
     lines = [ln for ln in stderr_text.strip().splitlines() if ln.strip() and not _NOISE_RE.search(ln)]
-    tail = " | ".join(lines[-3:])
-    raise RuntimeError("check did not finish inside the browser" + (f": {tail}" if tail else ""))
+    tail = lines[-1][:160] if lines else ""
+    for idx in range(count):
+        got = snap["slides"].get(idx)
+        if got is None:
+            unmeasured.append(idx)
+            why = "browser exited before measuring this slide" if exited_early else f"check gave up after {budget}s before measuring this slide"
+            issues.append(_unmeasured(idx, why + (f" ({tail})" if tail else "")))
+        else:
+            issues.extend(got)
+    return {"count": count, "issues": issues, "unmeasured": unmeasured}
 
 
-def finish(issues: list[dict[str, Any]], slides: list[str], disabled: set[str]) -> dict[str, Any]:
-    """Attach severity and slide file, drop disabled rules, sort, summarise."""
+def finish(issues: list[dict[str, Any]], slides: list[str], disabled: set[str], unmeasured: list[int] | None = None) -> dict[str, Any]:
+    """Attach severity and slide file, drop disabled rules, sort, summarise.
+
+    ``unmeasured`` lists slides the rendered run never reported; the UI shows the
+    result as partial and offers a re-run.
+    """
     out = []
     for it in issues:
         rule = str(it.get("rule", ""))
@@ -124,7 +180,7 @@ def finish(issues: list[dict[str, Any]], slides: list[str], disabled: set[str]) 
     counts: dict[str, int] = {}
     for it in out:
         counts[it["rule"]] = counts.get(it["rule"], 0) + 1
-    return {"issues": out, "counts": counts, "slides": len(slides), "rules": {r: s for r, s in RULES.items() if r not in disabled}, "disabled": sorted(disabled)}
+    return {"issues": out, "counts": counts, "slides": len(slides), "rules": {r: s for r, s in RULES.items() if r not in disabled}, "disabled": sorted(disabled), "unmeasured": sorted(unmeasured or [])}
 
 
 class CheckJobs:

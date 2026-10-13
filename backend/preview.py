@@ -199,9 +199,13 @@ def inject_select_helper(page: str) -> str:
     return page + script
 
 
-def check_document(count: int, stage: tuple[int, int] = (STAGE_W, STAGE_H)) -> str:
-    """The /check page: loads every slide in an iframe and measures it (inject/check.js)."""
-    cfg = json.dumps({"count": count, "base": "", "stage": {"width": stage[0], "height": stage[1]}})
+def check_document(count: int, stage: tuple[int, int] = (STAGE_W, STAGE_H), run: str = "", slide_timeout_ms: int = 20000) -> str:
+    """The /check page: loads every slide in an iframe and measures it (inject/check.js).
+
+    ``run`` names the run the page reports to (``POST /check/result``); without
+    it the page only leaves its result in the DOM.
+    """
+    cfg = json.dumps({"count": count, "base": "", "stage": {"width": stage[0], "height": stage[1]}, "run": run, "slideTimeoutMs": slide_timeout_ms})
     js = (_INJECT_DIR / "check.js").read_text(encoding="utf-8")
     return (
         "<!doctype html><html><head><meta charset=\"utf-8\"><title>hs-check</title></head>"
@@ -353,6 +357,68 @@ class PresentState:
             return self._changed.wait_for(lambda: self.seq != since, timeout=timeout)
 
 
+class CheckSink:
+    """Results of deck checks, pushed slide by slide by ``inject/check.js``.
+
+    The headless run used to hand its result back through ``--dump-dom`` at the
+    end; a run the browser gave up on early returned nothing at all. Now every
+    measured slide is POSTed to ``/check/result`` as it finishes, so a run that
+    stalls still yields the slides it did measure and the backend can tell
+    which ones are missing.
+    """
+
+    _TTL_SEC = 600
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._changed = threading.Condition(self._lock)
+        self._runs: dict[str, dict[str, Any]] = {}
+
+    def begin(self, run_id: str, count: int) -> None:
+        with self._lock:
+            now = time.time()
+            for k in [k for k, v in self._runs.items() if now - v["started"] > self._TTL_SEC]:
+                self._runs.pop(k, None)
+            self._runs[run_id] = {"started": now, "count": count, "slides": {}, "done": False}
+
+    def end(self, run_id: str) -> None:
+        with self._lock:
+            self._runs.pop(run_id, None)
+
+    def post(self, body: dict[str, Any]) -> bool:
+        """Record one slide's issues (or the final ``done`` mark). False for an unknown run."""
+        run_id = body.get("run")
+        with self._lock:
+            rec = self._runs.get(str(run_id)) if isinstance(run_id, str) else None
+            if rec is None:
+                return False
+            idx = body.get("slide")
+            if isinstance(idx, int) and 0 <= idx < rec["count"]:
+                issues = body.get("issues")
+                rec["slides"][idx] = [i for i in issues if isinstance(i, dict)] if isinstance(issues, list) else []
+            if body.get("done") is True:
+                rec["done"] = True
+            self._changed.notify_all()
+            return True
+
+    def snapshot(self, run_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            rec = self._runs.get(run_id)
+            if rec is None:
+                return None
+            return {"count": rec["count"], "done": rec["done"], "slides": {k: list(v) for k, v in rec["slides"].items()}}
+
+    def wait(self, run_id: str, timeout: float) -> bool:
+        """Block until the run posts anything new or ``timeout`` elapses; True when it is done."""
+        with self._lock:
+            rec = self._runs.get(run_id)
+            if rec is None:
+                return True
+            n = len(rec["slides"])
+            self._changed.wait_for(lambda: rec["done"] or len(rec["slides"]) != n, timeout=timeout)
+            return bool(rec["done"])
+
+
 class DeckPreview:
     """One running preview server for one deck folder."""
 
@@ -373,6 +439,7 @@ class DeckPreview:
         # deck's declared build output ("index.html").
         self.extra_files = frozenset(f.strip("/") for f in extra_files if f) | ({css_rel.strip("/")} if css_rel else frozenset())
         self.present = PresentState()
+        self.checks = CheckSink()
         # Tweak panel: live theme overrides (a CSS rule) printed into every wrapped
         # slide page; empty until the studio posts some. Never written to disk here.
         self.overrides_css = ""
@@ -589,7 +656,7 @@ class DeckPreview:
 
     def _handle_post(self, h: BaseHTTPRequestHandler) -> None:
         path = urlsplit(h.path).path
-        if path != "/present/state":
+        if path not in ("/present/state", "/check/result"):
             return _send(h, 404, b"not found", "text/plain")
         try:
             n = int(h.headers.get("Content-Length") or 0)
@@ -598,6 +665,11 @@ class DeckPreview:
             return _send(h, 400, b"bad json", "text/plain")
         if not isinstance(body, dict):
             return _send(h, 400, b"bad json", "text/plain")
+        if path == "/check/result":
+            # Same-origin only (the /check document posts here); no CORS header.
+            if not self.checks.post(body):
+                return _send(h, 404, b'{"error":"unknown_run"}', "application/json")
+            return _send(h, 200, b'{"ok":true}', "application/json")
         return _send(h, 200, json.dumps(self.present.update(body)).encode("utf-8"), "application/json", cors=_cors_origin(h))
 
     def _handle(self, h: BaseHTTPRequestHandler) -> None:
@@ -624,7 +696,12 @@ class DeckPreview:
         if path == "/health":
             return _send(h, 200, b'{"status":"ok"}', "application/json")
         if path == "/check":
-            return _send(h, 200, check_document(self.slide_count()).encode("utf-8"), "text/html; charset=utf-8")
+            q = parse_qs(url.query)
+            try:
+                slide_ms = max(1000, min(120000, int(q.get("slideTimeout", ["20000"])[0])))
+            except ValueError:
+                slide_ms = 20000
+            return _send(h, 200, check_document(self.slide_count(), run=q.get("run", [""])[0][:32], slide_timeout_ms=slide_ms).encode("utf-8"), "text/html; charset=utf-8")
         if path == "/print":
             return _send(h, 200, self.render_print().encode("utf-8"), "text/html; charset=utf-8")
         if path == "/show":

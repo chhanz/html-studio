@@ -708,6 +708,56 @@ test('deck check: finds the known issues, Fix turns an issue into a pin, Pin all
   await expect(sendBtn).toBeEnabled() // every generated pin already has a comment
 })
 
+test('deck check that stalls: measured slides are reported, the rest flagged with a re-run; a failed start offers retry', async ({ page }) => {
+  await openApp(page)
+  await addFixtureRoot(page)
+  await selectDeck(page, 'acme-messy')
+  // The backend's job answers are what the UI sees; emulate a run whose browser
+  // stalled on slide 2 (the backend's own partial-result path is unit-tested).
+  let mode: 'partial' | 'fail' | 'real' = 'partial'
+  await page.route('**/apps/html-studio/api/check?id=*', async (route) => {
+    if (mode === 'real') return route.fallback()
+    if (mode === 'fail') return route.fulfill({ json: { id: 'x', state: 'error', error: 'check_failed', detail: 'boom' } })
+    const result = {
+      issues: [
+        { rule: 'punctuation', severity: 'warning', slideIndex: 0, slideFile: '010_intro.html', selector: 'h1:nth-of-type(1)', tag: 'h1', classes: [], text: 'Hi', rect: { x: 0, y: 0, w: 10, h: 10 }, detail: 'contains em dash' },
+        { rule: 'check-error', severity: 'warning', slideIndex: 1, slideFile: '020_clean.html', selector: '', tag: '', classes: [], text: '', rect: null, detail: 'check gave up after 180s before measuring this slide' },
+      ],
+      counts: { punctuation: 1, 'check-error': 1 },
+      slides: 2,
+      rules: { punctuation: 'warning', 'check-error': 'warning' },
+      disabled: [],
+      unmeasured: [1],
+    }
+    return route.fulfill({ json: { id: 'x', state: 'done', result } })
+  })
+  await page.getByRole('button', { name: /^Check$/ }).click()
+  const panel = page.getByTestId('check-panel')
+  await expect(panel).toBeVisible({ timeout: 60_000 })
+  const notice = panel.getByTestId('check-partial-notice')
+  await expect(notice).toContainText('1 of 2 slides could not be measured')
+  await expect(panel.locator('[data-testid="check-count"][data-rule="check-error"]')).toHaveCount(1)
+  await expect(panel).toContainText('contains em dash') // the measured slide's issues are still there
+
+  // Re-run from the notice: this time the real backend answers and the deck is fully measured.
+  mode = 'real'
+  await panel.getByTestId('check-rerun').click()
+  await expect(page.getByRole('button', { name: /Checking 2 slides/ })).toBeVisible()
+  await expect(panel).toBeVisible({ timeout: 60_000 })
+  await expect(panel.getByTestId('check-partial-notice')).toHaveCount(0)
+  await expect(panel.locator('[data-testid="check-count"][data-rule="check-error"]')).toHaveCount(0)
+
+  // A run that fails outright keeps a retry button next to the error.
+  mode = 'fail'
+  await page.getByRole('button', { name: /^Check$/ }).click()
+  const alert = page.getByRole('alert').filter({ hasText: 'Check failed' })
+  await expect(alert).toContainText('boom')
+  mode = 'real'
+  await alert.getByTestId('check-retry').click()
+  await expect(panel).toBeVisible({ timeout: 60_000 })
+  await expect(page.getByRole('alert').filter({ hasText: 'Check failed' })).toHaveCount(0)
+})
+
 test('deck check with more than one batch of issues: Pin all and Send stop at 50 and say so; the rest follow later', async ({ page }) => {
   await openApp(page)
   await addFixtureRoot(page)

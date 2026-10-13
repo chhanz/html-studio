@@ -444,9 +444,12 @@ function Studio() {
           )}
           {selected && designInfo && <ThemeRow t={t} info={designInfo} onOpenTheme={() => setTweakOpen(true)} />}
           {selected && checkError && (
-            <div className="mb-2 flex-none rounded-md border p-2 text-[12px]" style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }} role="alert">
-              {t('check.failed')}: {t(`error.${checkError}`) === `error.${checkError}` ? t('error.generic', { code: checkError }) : t(`error.${checkError}`)}
-              {checkJob?.detail ? <span className="block text-muted break-all">{checkJob.detail}</span> : null}
+            <div className="mb-2 flex-none rounded-md border p-2 text-[12px] flex flex-wrap items-center gap-2" style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }} role="alert">
+              <span className="flex-1 min-w-0">
+                {t('check.failed')}: {t(`error.${checkError}`) === `error.${checkError}` ? t('error.generic', { code: checkError }) : t(`error.${checkError}`)}
+                {checkJob?.detail ? <span className="block text-muted break-all">{checkJob.detail}</span> : null}
+              </span>
+              <SmallBtn onClick={() => void check.runCheck()} data-testid="check-retry">{t('check.retry')}</SmallBtn>
             </div>
           )}
           {selected && checkResult && (
@@ -462,6 +465,7 @@ function Studio() {
               }}
               onFix={check.fixIssue}
               onFixAll={check.fixAllIssues}
+              onRerun={() => void check.runCheck()}
               onClose={() => check.setCheckResult(null)}
             />
           )}

@@ -15,6 +15,8 @@ type Props = {
   onJump: (slideIndex: number) => void
   onFix: (issue: CheckIssue) => void
   onFixAll: (draftCount: number) => void
+  /** Run the check again (offered when some slides were not measured). */
+  onRerun: () => void
   onClose: () => void
 }
 
@@ -33,8 +35,9 @@ export const MAX_BATCH = 50
  * and the measured detail. "Fix" turns the row into a pin (P2 flow), so the
  * check is just an automatic way of placing pins.
  */
-export function CheckPanel({ t, result, pinned, draftCount, pinAllLeft, onJump, onFix, onFixAll, onClose }: Props) {
+export function CheckPanel({ t, result, pinned, draftCount, pinAllLeft, onJump, onFix, onFixAll, onRerun, onClose }: Props) {
   const issues = result.issues
+  const unmeasured = result.unmeasured ?? []
   const bySlide = new Map<number, CheckIssue[]>()
   for (const i of issues) bySlide.set(i.slideIndex, [...(bySlide.get(i.slideIndex) ?? []), i])
   const unpinned = issues.filter((i) => !pinned.has(issueKey(i)))
@@ -42,6 +45,12 @@ export function CheckPanel({ t, result, pinned, draftCount, pinAllLeft, onJump, 
   const willPin = Math.min(unpinned.length, room)
   return (
     <div className="mb-2 rounded-md border border-border p-2 text-[12px]" data-testid="check-panel" role="region" aria-label={t('toolbar.check')} style={{ flex: '0 1 auto', minHeight: 72, maxHeight: '45%', overflowY: 'auto' }}>
+      {unmeasured.length > 0 && (
+        <div className="mb-1 rounded-sm px-2 py-1 flex flex-wrap items-center gap-2" role="status" data-testid="check-partial-notice" style={{ border: '1px solid var(--warn)', color: 'var(--text)', background: 'var(--bg)' }}>
+          <span className="flex-1 min-w-0">{t('check.partial', { n: unmeasured.length, total: result.slides })}</span>
+          <SmallBtn onClick={onRerun} data-testid="check-rerun">{t('check.retry')}</SmallBtn>
+        </div>
+      )}
       <div className="flex items-center gap-2 flex-wrap mb-1">
         <span className="font-medium text-text">{issues.length ? t('check.title', { n: issues.length }) : t('check.clean', { n: result.slides })}</span>
         {Object.entries(result.counts).map(([rule, n]) => (

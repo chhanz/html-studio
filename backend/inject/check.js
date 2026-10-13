@@ -1,8 +1,10 @@
 // Deck check: rendered rules, run by the /check document of the preview server
 // inside headless Chromium (one launch per deck). Each slide is loaded in a
-// same-origin iframe at stage size and measured; the result is written into
-// <script id="hs-check-output" type="application/json"> and the title becomes
-// "hs-check-done", which the backend reads back from --dump-dom.
+// same-origin iframe at stage size and measured. Every slide's issues are
+// POSTed to /check/result as soon as that slide is done (so a run the browser
+// gives up on still yields the slides it measured); the complete result is also
+// written into <script id="hs-check-output" type="application/json"> and the
+// title becomes "hs-check-done".
 //
 // Rules produced here (id -> what it means):
 //   overflow          element extends beyond the 1280x720 stage
@@ -13,6 +15,7 @@
 //   punctuation       em/en dash, middle dot or bullet character in text
 //   inline-font-size  font-size set in a style attribute
 //   external-resource src/href/url() that points at http(s)://
+//   check-error       the slide could not be measured (hung load, unreachable document)
 (function () {
   'use strict'
   var cfg = window.HS_CHECK || { count: 0, base: '', stage: { width: 1280, height: 720 } }
@@ -20,6 +23,17 @@
   var STAGE_H = cfg.stage.height
   var results = []
   var BATCH = 6
+
+  // One POST per slide (and one final "done"). Fire-and-forget: the backend
+  // treats a slide it never hears about as unmeasured, so a lost post only
+  // costs that slide's result, never the run.
+  function report(body) {
+    if (!cfg.run) return
+    body.run = cfg.run
+    try {
+      fetch(cfg.base + '/check/result', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), keepalive: true }).catch(function () { /* backend decides */ })
+    } catch (e) { /* no fetch: DOM output only */ }
+  }
 
   function selectorFor(el, root) {
     var parts = []
@@ -218,23 +232,24 @@
 
   // A slide that never settles must not hang the whole check: after this long
   // it is recorded as a check-error and the run moves on.
-  var SLIDE_TIMEOUT_MS = 20000
+  var SLIDE_TIMEOUT_MS = cfg.slideTimeoutMs > 0 ? cfg.slideTimeoutMs : 20000
 
   function loadSlide(index) {
     return new Promise(function (resolve) {
       var f = document.createElement('iframe')
       var done = false
       var timer = null
-      var finish = function (extra) {
+      var finish = function (slideIssues) {
         if (done) return
         done = true
         if (timer) clearTimeout(timer)
-        if (extra) results.push(extra)
+        results.push.apply(results, slideIssues)
+        report({ slide: index, issues: slideIssues })
         try { f.remove() } catch (e) { /* already gone */ }
         resolve()
       }
       var fail = function (detail) {
-        finish({ rule: 'check-error', slideIndex: index, selector: '', tag: '', classes: [], text: '', rect: null, detail: detail })
+        finish([{ rule: 'check-error', slideIndex: index, selector: '', tag: '', classes: [], text: '', rect: null, detail: detail }])
       }
       f.width = STAGE_W
       f.height = STAGE_H
@@ -243,11 +258,10 @@
         var fin = function () {
           if (done) return
           try {
-            results.push.apply(results, measure(index, f.contentDocument, f.contentWindow))
+            finish(measure(index, f.contentDocument, f.contentWindow))
           } catch (e) {
-            results.push({ rule: 'check-error', slideIndex: index, selector: '', tag: '', classes: [], text: '', rect: null, detail: String(e && e.message || e) })
+            fail(String(e && e.message || e))
           }
-          finish()
         }
         try {
           var d = f.contentDocument
@@ -280,5 +294,6 @@
     out.textContent = JSON.stringify({ count: cfg.count, issues: results })
     document.body.appendChild(out)
     document.title = 'hs-check-done'
+    report({ done: true })
   })
 })()

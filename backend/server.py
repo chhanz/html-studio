@@ -761,9 +761,12 @@ def route_check_start(_h: "Handler", body: dict[str, Any]) -> tuple[int, Any]:
     def run() -> dict[str, Any]:
         first = p.render_slide(0) or "" if slides else ""
         issues = check_lib.static_issues(slides, check_lib.first_slide_classes(first))
-        rendered = check_lib.run_rendered(browser, url)
+        rendered = check_lib.run_rendered(browser, url, p.checks, len(slides))
         issues.extend(i for i in rendered.get("issues", []) if isinstance(i, dict))
-        return check_lib.finish(issues, slides, disabled)
+        unmeasured = [i for i in rendered.get("unmeasured", []) if isinstance(i, int)]
+        if unmeasured:
+            _log(f"check for {deck}: {len(unmeasured)} of {len(slides)} slides not measured")
+        return check_lib.finish(issues, slides, disabled, unmeasured)
 
     job_id = CHECK_JOBS.start(run)
     _log(f"check {job_id} started for {deck} ({len(slides)} slides)")
