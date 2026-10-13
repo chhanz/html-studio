@@ -2,7 +2,7 @@
 # Ship this repository to the push host (the Mac cannot push to GitHub; the EC2
 # reachable as `ssh oui` can, with gh already logged in as the GitHub account).
 #
-#   tools/ship.sh              # sync main, release and tags to oui:~/git/html-studio
+#   tools/ship.sh              # sync main, release branches and tags to oui:~/git/html-studio
 #
 # What it does: writes a git bundle of every ref into $KIROCREW_SCRATCH (or
 # /tmp), copies it to oui:~/git/, and on the host fast-forwards the checkout at
@@ -39,9 +39,10 @@ ssh -o BatchMode=yes "$host" "set -e; cd $remote_dir/html-studio \
   && git fetch -q origin && echo 'local:' && git for-each-ref --format='  %(refname:short) %(objectname:short)' refs/heads refs/tags \
   && echo 'github:' && git for-each-ref --format='  %(refname:short) %(objectname:short)' refs/remotes/origin | grep -v HEAD"
 
+branches=$(git for-each-ref --format='%(refname:short)' refs/heads/ | grep -v '^main$' | tr '\n' ' ')
 cat <<EOF
 
 Now push from the host (not from here):
   ssh $host
-  cd $remote_dir/html-studio && git push origin main release --tags
+  cd $remote_dir/html-studio && git push origin main $branches--tags
 EOF
