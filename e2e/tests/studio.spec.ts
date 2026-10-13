@@ -708,6 +708,64 @@ test('deck check: finds the known issues, Fix turns an issue into a pin, Pin all
   await expect(sendBtn).toBeEnabled() // every generated pin already has a comment
 })
 
+test('deck check with more than one batch of issues: Pin all and Send stop at 50 and say so; the rest follow later', async ({ page }) => {
+  await openApp(page)
+  await addFixtureRoot(page)
+  await selectDeck(page, 'acme-messy')
+  const home = await fakeHome(page)
+  // 60 separate paragraphs, each with an em dash, on both slides: well over two batches of issues.
+  const paras = Array.from({ length: 60 }, (_, i) => `<p style="position:absolute;left:40px;top:${20 + i * 10}px">Item ${i} \u2014 note</p>`).join('')
+  await page.request.post('/__ctl/write', { data: { path: `${home}/decks/acme-messy/slides/020_clean.html`, text: `<section class="slide"><h2>Many</h2>${paras}</section>` } })
+  await page.request.post('/__ctl/write', { data: { path: `${home}/decks/acme-messy/slides/030_more.html`, text: `<section class="slide"><h2>More</h2>${paras}</section>` } })
+  await page.getByRole('button', { name: /^Check$/ }).click()
+  const panel = page.getByTestId('check-panel')
+  await expect(panel).toBeVisible({ timeout: 60_000 })
+  const total = await panel.getByTestId('check-issue').count()
+  expect(total).toBeGreaterThan(100)
+
+  // Pin all pins exactly one batch and says how many wait.
+  const pinAll = panel.getByTestId('check-fix-all')
+  await expect(pinAll).toHaveText(`Pin all (50/${total})`)
+  await expect(panel.getByTestId('check-batch-notice')).toContainText('at most 50 pins per batch')
+  await pinAll.click()
+  await expect(page.getByTestId('pin')).toHaveCount(50)
+  await expect(panel.getByTestId('check-batch-notice')).toContainText(`${total - 50} issues were not pinned`)
+  await expect(pinAll).toBeDisabled() // no room until the drafts are sent
+  await expect(pinAll).toHaveText(`Pin all (0/${total - 50})`)
+
+  // Send hands over the 50 drafts (exactly the backend's limit).
+  const send = page.getByTestId('pins-send')
+  await expect(send).toHaveText(/Send to agent \(50\)$/)
+  await send.click()
+  await expect(page.getByTestId('pin').first()).toHaveAttribute('data-status', 'sent')
+  await expect(page.locator('[data-testid="pin"][data-status="sent"]')).toHaveCount(50)
+  const chat = await (await page.request.get('/__ctl/chat')).json()
+  const prompt: string = chat.log.filter((l: any) => l.path.startsWith('/api/chat?')).at(-1).body.message
+  expect(prompt).toContain('50 pinned comments')
+
+  // With the batch out, Pin all picks up the next 50; the remainder waits again.
+  await expect(pinAll).toBeEnabled()
+  await expect(pinAll).toHaveText(`Pin all (50/${total - 50})`)
+  await pinAll.click()
+  await expect(page.getByTestId('pin')).toHaveCount(100)
+  await expect(panel.getByTestId('check-batch-notice')).toContainText(`${total - 100} issues were not pinned`)
+
+  // Drafts never exceed a batch here, so Send shows a plain count. Add one by hand
+  // over the limit and the send button and panel say what will be kept.
+  await page.getByRole('button', { name: /^Select$/ }).click()
+  const frame = page.frameLocator('[data-testid="slide-stage"] iframe')
+  await expect(frame.locator('.hs-pin-layer')).toHaveCount(1)
+  await frame.locator('h1, h2').first().click()
+  await expect(page.locator('[data-testid="pin"][data-status="new"]')).toHaveCount(51)
+  await expect(send).toHaveText(/Send to agent \(50\/51\)$/)
+  await expect(page.getByTestId('pins-batch-notice')).toContainText('at most 50 pins')
+  await page.getByRole('textbox', { name: /Comment for pin 101/ }).fill('By hand')
+  await send.click()
+  await expect(page.locator('[data-testid="pin"][data-status="sent"]')).toHaveCount(100)
+  await expect(page.locator('[data-testid="pin"][data-status="new"]')).toHaveCount(1)
+  await expect(page.getByTestId('pins-batch-notice')).toContainText('1 drafts were kept for the next batch')
+})
+
 test('quick action chips send a prompt about the current slide to the deck chat', async ({ page }) => {
   await openApp(page)
   await addFixtureRoot(page)

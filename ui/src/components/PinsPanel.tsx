@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { elementLabel, type Pin } from '../pins'
+import { MAX_BATCH } from './CheckPanel'
 import { SmallBtn } from './SmallBtn'
 import { Spinner } from './Spinner'
 
@@ -12,6 +13,8 @@ type Props = {
   activeId: string | null
   sending: boolean
   sendError: string | null
+  /** Drafts the last send left behind (one batch at a time). */
+  sendLeft: number
   onComment: (id: string, comment: string) => void
   onRemove: (id: string) => void
   onJump: (slideIndex: number, id: string) => void
@@ -34,11 +37,13 @@ const STATUS_COLOR: Record<Pin['status'], string> = {
  * deck's chat session as one batch; the agent's per-pin reports come back as a
  * status and a short thread, and questions can be answered inline.
  */
-export function PinsPanel({ t, pins, current, activeId, sending, sendError, onComment, onRemove, onJump, onClearAll, onSend, onReply, onDismissDone }: Props) {
+export function PinsPanel({ t, pins, current, activeId, sending, sendError, sendLeft, onComment, onRemove, onJump, onClearAll, onSend, onReply, onDismissDone }: Props) {
   if (pins.length === 0) return null
   const drafts = pins.filter((p) => p.status === 'new')
   const missing = drafts.some((p) => !p.comment.trim())
   const finished = pins.filter((p) => p.status === 'done')
+  const over = drafts.length > MAX_BATCH
+  const sendNow = Math.min(drafts.length, MAX_BATCH)
   return (
     <div className="mt-2 rounded-md border border-border p-2 text-[12px]" data-testid="pins-panel" style={{ flex: '0 1 auto', minHeight: 96, maxHeight: '45%', overflowY: 'auto' }}>
       <div className="flex items-center gap-2 mb-1 flex-wrap">
@@ -51,15 +56,20 @@ export function PinsPanel({ t, pins, current, activeId, sending, sendError, onCo
             active
             onClick={onSend}
             disabled={sending || drafts.length === 0 || missing}
-            title={t('pins.send_hint')}
+            title={over ? t('pins.batch_limit', { max: MAX_BATCH }) : t('pins.send_hint')}
             className="inline-flex items-center gap-1"
             data-testid="pins-send"
           >
             {sending && <Spinner />}
-            {sending ? t('pins.sending') : `${t('pins.send')} (${drafts.length})`}
+            {sending ? t('pins.sending') : `${t('pins.send')} (${over ? `${sendNow}/${drafts.length}` : drafts.length})`}
           </SmallBtn>
         </span>
       </div>
+      {(over || sendLeft > 0) && (
+        <div className="mb-1 rounded-sm px-2 py-1" role="status" data-testid="pins-batch-notice" style={{ border: '1px solid var(--warn)', color: 'var(--text)', background: 'var(--bg)' }}>
+          {over ? t('pins.batch_limit', { max: MAX_BATCH }) : t('pins.batch_left', { n: sendLeft })}
+        </div>
+      )}
       <ul className="flex flex-col gap-1">
         {pins.map((p) => (
           <PinRow key={p.id} t={t} pin={p} current={current} active={p.id === activeId} onComment={onComment} onRemove={onRemove} onJump={onJump} onReply={onReply} />

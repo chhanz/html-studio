@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ApiError, type Client, type Deck, type PreviewInfo } from '../api'
+import { MAX_BATCH } from '../components/CheckPanel'
 import { type Capture, type Pin, loadPins, newPin, savePins } from '../pins'
 import type { ViewMode } from './usePreview'
 
@@ -95,10 +96,13 @@ export function usePins({ client, selected, preview, current, locale, setCurrent
 
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
+  // Drafts left behind by the last send because a batch holds at most MAX_BATCH pins.
+  const [sendLeft, setSendLeft] = useState(0)
   const sendPins = useCallback(async () => {
     if (!selected || sending) return
-    const drafts = pins.filter((p) => p.status === 'new' && p.comment.trim())
-    if (!drafts.length) return
+    const ready = pins.filter((p) => p.status === 'new' && p.comment.trim())
+    if (!ready.length) return
+    const drafts = ready.slice(0, MAX_BATCH)
     setSending(true)
     setSendError(null)
     try {
@@ -106,6 +110,7 @@ export function usePins({ client, selected, preview, current, locale, setCurrent
       await postToChat(selected, batch.prompt)
       const cidByPin = new Map(batch.comments.map((c) => [c.pinId, c.cid]))
       setPins((prev) => prev.map((p) => (cidByPin.has(p.id) ? { ...p, status: 'sent', batchId: batch.id, batchCid: cidByPin.get(p.id), thread: [] } : p)))
+      setSendLeft(ready.length - drafts.length)
       bumpChat()
     } catch (e) {
       setSendError(e instanceof ApiError ? e.code : e instanceof Error ? e.message : 'request_failed')
@@ -113,6 +118,7 @@ export function usePins({ client, selected, preview, current, locale, setCurrent
       setSending(false)
     }
   }, [client, selected, pins, sending, locale, postToChat, bumpChat])
+  useEffect(() => setSendLeft(0), [selected?.path])
 
   // Poll the queue while any pin is out with the agent; a finished batch reloads the preview.
   const outstanding = pins.some((p) => p.status === 'sent')
@@ -189,6 +195,7 @@ export function usePins({ client, selected, preview, current, locale, setCurrent
     jumpToPin,
     sending,
     sendError,
+    sendLeft,
     sendPins,
     replyToPin,
     dismissDone,

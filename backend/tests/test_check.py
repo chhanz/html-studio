@@ -48,6 +48,37 @@ class StaticTests(unittest.TestCase):
         self.assertNotIn("contrast", r["rules"])
         self.assertEqual(r["disabled"], ["contrast"])
 
+    def test_check_error_is_reported_as_a_warning(self) -> None:
+        r = check.finish([{"rule": "check-error", "slideIndex": 1, "detail": "slide did not settle within 20s"}], ["a.html", "b.html"], set())
+        self.assertEqual([(i["rule"], i["severity"], i["slideFile"]) for i in r["issues"]], [("check-error", "warning", "b.html")])
+
+    def test_run_rendered_retries_once_and_hides_display_noise(self) -> None:
+        calls: list[int] = []
+        noise = "[1013/143034.689762:ERROR:ui/display/mac/cv_display_link_mac.mm:195] CVDisplayLinkCreateWithCGDisplay failed. CVReturn: -6670\nreal problem here\n"
+
+        def fake_run(browser: str, url: str, timeout: int) -> tuple[list[str], str]:
+            calls.append(1)
+            if len(calls) == 1:
+                return [], noise
+            return ['{"count": 1, "issues": []}'], ""
+
+        orig = check._run_once
+        check._run_once = fake_run  # type: ignore[assignment]
+        try:
+            self.assertEqual(check.run_rendered("chrome", "http://x/check")["count"], 1)
+            self.assertEqual(len(calls), 2)
+            calls.clear()
+            check._run_once = lambda b, u, t: ([], noise)  # type: ignore[assignment]
+            with self.assertRaises(RuntimeError) as cm:
+                check.run_rendered("chrome", "http://x/check")
+            self.assertEqual(str(cm.exception), "check did not finish inside the browser: real problem here")
+            check._run_once = lambda b, u, t: ([], noise.splitlines()[0] + "\n")  # type: ignore[assignment]
+            with self.assertRaises(RuntimeError) as cm:
+                check.run_rendered("chrome", "http://x/check")
+            self.assertEqual(str(cm.exception), "check did not finish inside the browser")
+        finally:
+            check._run_once = orig  # type: ignore[assignment]
+
 
 @unittest.skipIf(BROWSER is None, "no headless Chromium available")
 class RenderedTests(unittest.TestCase):
@@ -84,6 +115,51 @@ class RenderedTests(unittest.TestCase):
         for i in r["issues"]:
             self.assertTrue(i["selector"], i)
             self.assertIsNotNone(i["rect"], i)
+
+    def test_slide_that_never_settles_is_reported_not_hung(self) -> None:
+        import socket
+        import threading
+
+        # A server that accepts connections and never answers: the image load never ends.
+        sink = socket.socket()
+        sink.bind(("127.0.0.1", 0))
+        sink.listen(8)
+        held: list[socket.socket] = []
+        stop = threading.Event()
+
+        def accept() -> None:
+            sink.settimeout(0.2)
+            while not stop.is_set():
+                try:
+                    c, _ = sink.accept()
+                    held.append(c)
+                except OSError:
+                    pass
+
+        t = threading.Thread(target=accept, daemon=True)
+        t.start()
+        port_sink = sink.getsockname()[1]
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                deck = Path(tmp) / "deck"
+                (deck / "slides").mkdir(parents=True)
+                (deck / "slides" / "010.html").write_text(f'<section class="slide cover"><h1>Stuck</h1><img src="http://127.0.0.1:{port_sink}/never.png" alt="x" width="10" height="10"></section>', encoding="utf-8")
+                (deck / "slides" / "020.html").write_text(SLIDE_B, encoding="utf-8")
+                p = preview.DeckPreview(deck, "slides", None)
+                port = p.start()
+                try:
+                    r = check.run_rendered(BROWSER, f"http://127.0.0.1:{port}/check", timeout=90, retries=0)
+                finally:
+                    p.stop()
+        finally:
+            stop.set()
+            for c in held:
+                c.close()
+            sink.close()
+        self.assertEqual(r["count"], 2)
+        errs = [i for i in r["issues"] if i["rule"] == "check-error"]
+        self.assertEqual([i["slideIndex"] for i in errs], [0])
+        self.assertIn("did not settle", errs[0]["detail"])
 
 
 if __name__ == "__main__":

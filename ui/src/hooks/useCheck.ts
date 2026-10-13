@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ApiError, type CheckIssue, type CheckJob, type CheckResult, type Client, type Deck, type PreviewInfo } from '../api'
-import { issueKey } from '../components/CheckPanel'
+import { MAX_BATCH, issueKey } from '../components/CheckPanel'
 import { type Capture, type Pin, newPin } from '../pins'
 import { slideFileFor } from './usePins'
 
@@ -86,10 +86,21 @@ export function useCheck({ client, selected, preview, t, setPins, pinnedIssues }
     },
     [preview, selected?.kind, selected?.entry, selected?.slidesDir, t, setPins], // eslint-disable-line react-hooks/exhaustive-deps
   )
-  const fixAllIssues = useCallback(() => {
-    if (!checkResult) return
-    for (const i of checkResult.issues) if (!pinnedIssues.has(issueKey(i))) fixIssue(i)
-  }, [checkResult, pinnedIssues, fixIssue])
+  // "Pin all" places at most one batch of pins (the backend accepts 50 per
+  // send). Issues beyond that stay in the list, marked unpinned, to be pinned
+  // once the first batch is through; the panel says how many wait.
+  const [pinAllLeft, setPinAllLeft] = useState(0)
+  useEffect(() => setPinAllLeft(0), [checkResult])
+  const fixAllIssues = useCallback(
+    (draftCount: number) => {
+      if (!checkResult) return
+      const todo = checkResult.issues.filter((i) => !pinnedIssues.has(issueKey(i)))
+      const room = Math.max(0, MAX_BATCH - draftCount)
+      for (const i of todo.slice(0, room)) fixIssue(i)
+      setPinAllLeft(Math.max(0, todo.length - room))
+    },
+    [checkResult, pinnedIssues, fixIssue],
+  )
 
-  return { checkJob, checkResult, setCheckResult, checkError, runCheck, fixIssue, fixAllIssues }
+  return { checkJob, checkResult, setCheckResult, checkError, runCheck, fixIssue, fixAllIssues, pinAllLeft }
 }

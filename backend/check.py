@@ -35,6 +35,9 @@ RULES: dict[str, str] = {
     "punctuation": "warning",
     "external-resource": "warning",
     "inline-font-size": "info",
+    # Emitted by check.js when one slide could not be measured (hung load,
+    # unreachable document); the rest of the deck is still reported.
+    "check-error": "warning",
 }
 
 _RESULT_RE = re.compile(r'<script id="hs-check-output" type="application/json">(.*?)</script>', re.S)
@@ -60,13 +63,23 @@ def first_slide_classes(fragment: str) -> list[str]:
     return [c for c in (m.group(2).split() if m else []) if c != "active"]
 
 
-def run_rendered(browser: str, check_url: str, *, timeout: int = CHECK_TIMEOUT_SEC) -> dict[str, Any]:
-    """Run the /check document in headless Chromium and return its JSON result."""
+# stderr lines Chromium prints on macOS that carry no information about the
+# check (the display link could not be created, e.g. while a display sleeps or
+# is being re-plugged). Dropped from the error shown to the user so the real
+# cause, if any, is what they read.
+_NOISE_RE = re.compile(r"CVDisplayLink|cv_display_link_mac|ui/display/mac")
+
+
+def _run_once(browser: str, check_url: str, timeout: int) -> tuple[list[str], str]:
     with tempfile.TemporaryDirectory(prefix="html-studio-check-") as profile:
         cmd = [
             browser, "--headless", "--disable-gpu", "--no-sandbox", "--hide-scrollbars",
             f"--user-data-dir={profile}", "--use-mock-keychain", "--password-store=basic",
             "--no-first-run", "--no-default-browser-check", "--disable-extensions",
+            # Best effort: do not drive frames from the macOS display link, which
+            # fails while a display is asleep or being re-plugged (unknown feature
+            # names are ignored by Chromium).
+            "--disable-features=CVDisplayLinkBeginFrameSource",
             "--window-size=1400,900", "--run-all-compositor-stages-before-draw",
             f"--virtual-time-budget={timeout * 1000}", "--dump-dom", check_url,
         ]
@@ -76,11 +89,25 @@ def run_rendered(browser: str, check_url: str, *, timeout: int = CHECK_TIMEOUT_S
             errf.seek(0)
             stderr_text = errf.read()
     dom = proc.stdout.decode("utf-8", errors="replace")
-    matches = _RESULT_RE.findall(dom)  # the inlined check.js mentions the marker in a comment; the real one is last
-    if not matches:
-        tail = " | ".join(stderr_text.strip().splitlines()[-3:])
-        raise RuntimeError("check did not finish inside the browser" + (f": {tail}" if tail else ""))
-    return json.loads(matches[-1])
+    # The inlined check.js mentions the marker in a comment; the real one is last.
+    return _RESULT_RE.findall(dom), stderr_text
+
+
+def run_rendered(browser: str, check_url: str, *, timeout: int = CHECK_TIMEOUT_SEC, retries: int = 1) -> dict[str, Any]:
+    """Run the /check document in headless Chromium and return its JSON result.
+
+    A run that ends without the result marker (the browser gave up on the page
+    before check.js finished) is retried once with a fresh profile: the cause is
+    usually transient (display change, a cold start) and a second run is cheap.
+    """
+    stderr_text = ""
+    for attempt in range(retries + 1):
+        matches, stderr_text = _run_once(browser, check_url, timeout)
+        if matches:
+            return json.loads(matches[-1])
+    lines = [ln for ln in stderr_text.strip().splitlines() if ln.strip() and not _NOISE_RE.search(ln)]
+    tail = " | ".join(lines[-3:])
+    raise RuntimeError("check did not finish inside the browser" + (f": {tail}" if tail else ""))
 
 
 def finish(issues: list[dict[str, Any]], slides: list[str], disabled: set[str]) -> dict[str, Any]:

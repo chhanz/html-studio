@@ -454,6 +454,8 @@ function Studio() {
               t={t}
               result={checkResult}
               pinned={pins.pinnedIssues}
+              draftCount={pins.pins.filter((p) => p.status === 'new').length}
+              pinAllLeft={check.pinAllLeft}
               onJump={(i) => {
                 setCurrent(i)
                 setViewMode('slides')
@@ -562,6 +564,7 @@ function Studio() {
                   activeId={activePin}
                   sending={pins.sending}
                   sendError={pins.sendError}
+                  sendLeft={pins.sendLeft}
                   onComment={pins.updatePinComment}
                   onRemove={pins.removePin}
                   onJump={pins.jumpToPin}

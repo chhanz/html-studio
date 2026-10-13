@@ -16,7 +16,7 @@ HTML decks are easy for an agent to write and hard for a person to steer: you en
 - Keeps up with the folder: slides the agent adds or edits appear within a few seconds.
 
 **Steer the agent**
-- **Select to edit**: click an element in the preview, write what should change, send the pins to the deck's chat session in one batch. The agent gets file, selector, text and your comment, and reports back per pin.
+- **Select to edit**: click an element in the preview, write what should change, send the pins to the deck's chat session in one batch (up to 50 pins; the rest wait as drafts for the next batch). The agent gets file, selector, text and your comment, and reports back per pin.
 - **Quick requests**: one-click prompts for the current slide (tighten text, draft the next slide, write notes).
 - **Deck chat**: a chat session bound to the deck folder, briefed once on the deck's layout, stylesheet, build and conventions.
 

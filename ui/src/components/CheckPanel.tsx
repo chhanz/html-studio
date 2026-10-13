@@ -8,9 +8,13 @@ type Props = {
   result: CheckResult
   /** Issues already turned into pins (by issue key), shown as such. */
   pinned: Set<string>
+  /** Pins still in draft (count against the batch limit). */
+  draftCount: number
+  /** Issues "Pin all" left unpinned because the batch was full. */
+  pinAllLeft: number
   onJump: (slideIndex: number) => void
   onFix: (issue: CheckIssue) => void
-  onFixAll: () => void
+  onFixAll: (draftCount: number) => void
   onClose: () => void
 }
 
@@ -21,16 +25,21 @@ export function issueKey(i: CheckIssue): string {
   return `${i.rule}|${i.slideIndex}|${i.selector}|${i.otherSelector ?? ''}`
 }
 
+/** Pins per batch the backend accepts (POST /pins/send). */
+export const MAX_BATCH = 50
+
 /**
  * Result of a deck check: one row per issue with a rule label, the element
  * and the measured detail. "Fix" turns the row into a pin (P2 flow), so the
  * check is just an automatic way of placing pins.
  */
-export function CheckPanel({ t, result, pinned, onJump, onFix, onFixAll, onClose }: Props) {
+export function CheckPanel({ t, result, pinned, draftCount, pinAllLeft, onJump, onFix, onFixAll, onClose }: Props) {
   const issues = result.issues
   const bySlide = new Map<number, CheckIssue[]>()
   for (const i of issues) bySlide.set(i.slideIndex, [...(bySlide.get(i.slideIndex) ?? []), i])
   const unpinned = issues.filter((i) => !pinned.has(issueKey(i)))
+  const room = Math.max(0, MAX_BATCH - draftCount)
+  const willPin = Math.min(unpinned.length, room)
   return (
     <div className="mb-2 rounded-md border border-border p-2 text-[12px]" data-testid="check-panel" role="region" aria-label={t('toolbar.check')} style={{ flex: '0 1 auto', minHeight: 72, maxHeight: '45%', overflowY: 'auto' }}>
       <div className="flex items-center gap-2 flex-wrap mb-1">
@@ -42,10 +51,19 @@ export function CheckPanel({ t, result, pinned, onJump, onFix, onFixAll, onClose
         ))}
         {result.disabled.length > 0 && <span className="text-muted">{t('check.disabled', { rules: result.disabled.join(', ') })}</span>}
         <span className="ml-auto inline-flex gap-1">
-          {unpinned.length > 0 && <SmallBtn onClick={onFixAll}>{t('check.fix_all')} ({unpinned.length})</SmallBtn>}
+          {unpinned.length > 0 && (
+            <SmallBtn onClick={() => onFixAll(draftCount)} disabled={willPin === 0} title={willPin < unpinned.length ? t('check.fix_all_limit', { max: MAX_BATCH }) : undefined} data-testid="check-fix-all">
+              {t('check.fix_all')} ({willPin < unpinned.length ? `${willPin}/${unpinned.length}` : unpinned.length})
+            </SmallBtn>
+          )}
           <SmallBtn onClick={onClose}>{t('check.close')}</SmallBtn>
         </span>
       </div>
+      {(pinAllLeft > 0 || (unpinned.length > 0 && willPin < unpinned.length)) && (
+        <div className="mb-1 rounded-sm px-2 py-1" role="status" data-testid="check-batch-notice" style={{ border: '1px solid var(--warn)', color: 'var(--text)', background: 'var(--bg)' }}>
+          {pinAllLeft > 0 ? t('check.fix_all_left', { n: pinAllLeft, max: MAX_BATCH }) : t('check.fix_all_limit', { max: MAX_BATCH })}
+        </div>
+      )}
       {issues.length > 0 && (
         <ul className="flex flex-col gap-0.5">
           {[...bySlide.entries()].map(([slideIndex, list]) => (

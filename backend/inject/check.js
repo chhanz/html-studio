@@ -216,27 +216,51 @@
     return issues
   }
 
+  // A slide that never settles must not hang the whole check: after this long
+  // it is recorded as a check-error and the run moves on.
+  var SLIDE_TIMEOUT_MS = 20000
+
   function loadSlide(index) {
     return new Promise(function (resolve) {
       var f = document.createElement('iframe')
+      var done = false
+      var timer = null
+      var finish = function (extra) {
+        if (done) return
+        done = true
+        if (timer) clearTimeout(timer)
+        if (extra) results.push(extra)
+        try { f.remove() } catch (e) { /* already gone */ }
+        resolve()
+      }
+      var fail = function (detail) {
+        finish({ rule: 'check-error', slideIndex: index, selector: '', tag: '', classes: [], text: '', rect: null, detail: detail })
+      }
       f.width = STAGE_W
       f.height = STAGE_H
       f.style.cssText = 'position:absolute;left:0;top:0;width:' + STAGE_W + 'px;height:' + STAGE_H + 'px;border:0;visibility:hidden'
       f.onload = function () {
         var fin = function () {
+          if (done) return
           try {
             results.push.apply(results, measure(index, f.contentDocument, f.contentWindow))
           } catch (e) {
             results.push({ rule: 'check-error', slideIndex: index, selector: '', tag: '', classes: [], text: '', rect: null, detail: String(e && e.message || e) })
           }
-          f.remove()
-          resolve()
+          finish()
         }
-        var d = f.contentDocument
-        var ready = d && d.fonts && d.fonts.ready ? d.fonts.ready : Promise.resolve()
-        var imgs = Array.prototype.slice.call(d.images).filter(function (i) { return !i.complete })
-        Promise.all([ready].concat(imgs.map(function (i) { return new Promise(function (r) { i.onload = i.onerror = r }) }))).then(function () { setTimeout(fin, 30) }, fin)
+        try {
+          var d = f.contentDocument
+          if (!d) return fail('slide document not reachable')
+          var ready = d.fonts && d.fonts.ready ? d.fonts.ready : Promise.resolve()
+          var imgs = Array.prototype.slice.call(d.images).filter(function (i) { return !i.complete })
+          Promise.all([ready].concat(imgs.map(function (i) { return new Promise(function (r) { i.onload = i.onerror = r }) }))).then(function () { setTimeout(fin, 30) }, fin)
+        } catch (e) {
+          fail(String(e && e.message || e))
+        }
       }
+      f.onerror = function () { fail('slide failed to load') }
+      timer = setTimeout(function () { fail('slide did not settle within ' + SLIDE_TIMEOUT_MS / 1000 + 's') }, SLIDE_TIMEOUT_MS)
       f.src = cfg.base + '/slide/' + index
       document.body.appendChild(f)
     })
