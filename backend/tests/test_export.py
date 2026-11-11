@@ -91,6 +91,33 @@ class BuiltinOutputPrintTests(unittest.TestCase):
             finally:
                 p.stop()
 
+    def test_print_survives_deck_defining_a_fixed_stage_and_hidden_slides(self) -> None:
+        """A single-file deck whose own CSS makes `.stage` a fixed, clipped 16:9 box
+        (and hides every slide until the runtime marks it active) must still print
+        one page per slide. Before the fix the print body carried the deck's `stage`
+        class, so the deck's rule clipped the whole document to one page."""
+        with tempfile.TemporaryDirectory() as tmp:
+            deck = Path(tmp) / "deck"
+            deck.mkdir()
+            sections = "".join(f"<section class='slide'><h1>S{i}</h1></section>" for i in range(3))
+            (deck / "index.html").write_text(
+                "<!doctype html><html><head><meta charset='utf-8'><style>"
+                "html,body{height:100%;overflow:hidden}"
+                ".stage{position:fixed;top:0;left:0;width:1920px;height:1080px;overflow:hidden;"
+                "transform:scale(.5);container-type:size}"
+                ".slide{position:fixed;inset:0;opacity:0;visibility:hidden;transform:translateY(20px)}"
+                ".slide.active{opacity:1;visibility:visible;transform:none}"
+                f"</style></head><body><div class='stage'>{sections}</div></body></html>"
+            )
+            p = preview.DeckPreview(deck, ".", None, entry="index.html")
+            port = p.start()
+            try:
+                out = deck / "deck.pdf"
+                export.render_pdf(BROWSER, f"http://127.0.0.1:{port}/print", out, timeout=60)
+                self.assertEqual(pdf_pages(out.read_bytes()), 3)
+            finally:
+                p.stop()
+
 
 if __name__ == "__main__":
     unittest.main()

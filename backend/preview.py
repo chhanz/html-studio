@@ -155,6 +155,22 @@ def _inject_pageno(fragment: str, n: int) -> str:
     return _FOOT_RE.sub(repl, fragment, count=1)
 
 
+_SLIDE_HIDDEN_RE = re.compile(
+    r"""<section\b(?:[^>]*\s(?:hidden)(?:[\s=>/])|[^>]*\bclass=(["'])[^"']*\bis-hidden\b[^"']*\1)""", re.I | re.S
+)
+
+
+def _print_page(fragment: str) -> str:
+    """Wrap one slide fragment in its own 1280x720 page box for the print document.
+
+    A slide its deck hides (``hidden`` attribute or ``is-hidden`` class) hides
+    its page too, so it leaves no blank sheet behind.
+    """
+    m = _SECTION_RE.search(fragment)
+    hidden = " hidden" if m and _SLIDE_HIDDEN_RE.match(m.group(0)) else ""
+    return f'<div class="hs-page stage"{hidden}>{fragment}</div>'
+
+
 # Helper injected into the built deck when it is shown inside the studio's
 # presenter (``?hs=present``). The presenter is a different origin, so it cannot
 # inspect the deck's DOM; instead it sends the click point and this script
@@ -565,20 +581,37 @@ class DeckPreview:
         force = (
             "<style>"
             f"@page{{size:{STAGE_W}px {STAGE_H}px;margin:0}}"
-            f"html,body{{margin:0;padding:0;background:#fff;width:{STAGE_W}px}}"
+            # Nothing of the deck's own layout may leak onto the document itself:
+            # a deck that fixes/clips `html, body` for its runtime would otherwise
+            # clip the print document to its first page.
+            f"html,body.hs-print{{margin:0!important;padding:0!important;background:#fff;width:{STAGE_W}px!important;"
+            "height:auto!important;min-height:0!important;max-height:none!important;overflow:visible!important;"
+            "position:static!important;transform:none!important;container-type:normal!important}"
             "*,*::before,*::after{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}"
-            ".hs-print>.slide:not(.is-hidden):not([hidden]){display:flex!important;position:relative!important;inset:auto!important;"
+            # One page box per slide. It also carries the deck's `stage` class
+            # (decks scope their print rules, and sometimes their container-query
+            # units, to it), so every stage-ish rule the deck applies is pinned to
+            # exactly the page size here rather than to the document.
+            f".hs-page{{display:block!important;position:relative!important;inset:auto!important;width:{STAGE_W}px!important;"
+            f"height:{STAGE_H}px!important;margin:0!important;padding:0!important;overflow:hidden!important;"
+            "transform:none!important;container-type:size;break-after:page;page-break-after:always;"
+            "break-inside:avoid;page-break-inside:avoid;background:transparent}"
+            ".hs-page:last-child{break-after:auto;page-break-after:auto}"
+            ".hs-page[hidden],.hs-page.is-hidden{display:none!important}"
+            # The slide fills its page whatever the runtime would have done to it
+            # (decks hide every slide until their script marks one active).
+            f".hs-page>.slide{{display:flex!important;position:relative!important;inset:auto!important;"
             f"width:{STAGE_W}px!important;height:{STAGE_H}px!important;margin:0!important;overflow:hidden;"
-            "break-after:page;page-break-after:always;break-inside:avoid;page-break-inside:avoid;animation:none!important;transition:none!important}"
-            ".hs-print>.slide:last-child{break-after:auto;page-break-after:auto}"
+            "opacity:1!important;visibility:visible!important;transform:none!important;"
+            "animation:none!important;transition:none!important}"
             ".hs-print .slide *{animation:none!important;transition:none!important}"
             "</style>"
         )
-        body = "".join(_inject_pageno(frag, i + 1) for i, frag in enumerate(fragments))
+        body = "".join(_print_page(_inject_pageno(frag, i + 1)) for i, frag in enumerate(fragments))
         return (
             "<!doctype html><html><head><meta charset=\"utf-8\"><base href=\"/\">"
             f"<title>{html.escape(title)}</title>{head_extra}{inline}{link}{force}</head>"
-            f"<body class=\"hs-print stage\">{body}</body></html>"
+            f"<body class=\"hs-print\">{body}</body></html>"
         )
 
     def render_show(self) -> str | None:
